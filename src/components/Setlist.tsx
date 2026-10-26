@@ -49,7 +49,7 @@ export function Setlist({ songs, currentId, onSelect, onImport, onRemove, onMove
       <input
         ref={input}
         type="file"
-        accept="audio/*,.wav,.mp3,.m4a,.aif,.aiff,.flac,.ogg"
+        accept="audio/*,.wav,.wave,.bwf,.rf64,.mp3,.m4a,.aif,.aiff,.flac,.ogg"
         multiple
         hidden
         onChange={(e) => {

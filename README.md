@@ -15,7 +15,13 @@ A multitrack backing-track player for live worship and band use, in the spirit o
   - **Mute MIDI** silences the MIDI messages the app sends to Web MIDI outputs (start, stop, continue, and a program change on each song change).
   - **Link** rolls into the next song when the current one ends.
 - **Setlist.** Song cards with artwork, key and tempo. In EDIT mode you can reorder or remove songs.
-- **Bring your own stems.** Use **Import stems**, or drop audio files on the window. Each file becomes a channel. Then use EDIT to set the BPM, meter, key and click offset, and to add sections at the playhead.
+- **Bring your own stems.** Use **Import stems**, or drop audio files on the window. Each file becomes a channel. Then use EDIT to set the BPM, meter, key and click offset, and to add sections at the playhead. Files that can't be decoded are skipped, and the app says why, so the rest of the song still imports.
+- **WAV import.** WAV is the recommended format. Player has its own WAV reader, so WAV files decode the same in every browser. It handles:
+  - 8/16/24/32-bit PCM, 32/64-bit float, A-law and µ-law
+  - WAVE_FORMAT_EXTENSIBLE files, RF64/BW64 files over 4 GB, and recorder files whose headers were never finalised
+  - Metadata DAWs embed in exports: cue markers with labels become song sections, the `acid` chunk sets tempo and meter, and `LIST/INFO` sets the song title.
+
+  Other formats (MP3, AAC/M4A, FLAC, OGG, AIFF) use the browser's decoder.
 - **Demo songs.** Three synthesized demo songs (Guide, Drums, Perc, Bass, AG and EG 1 stems) are included, so the app works without any setup.
 
 ## Keyboard

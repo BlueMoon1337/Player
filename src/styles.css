@@ -727,7 +727,7 @@ button.small {
 }
 .toast {
   position: fixed;
-  bottom: 16px;
+  top: 68px;
   left: 50%;
   transform: translateX(-50%);
   background: #3b1111;
@@ -736,6 +736,15 @@ button.small {
   border-radius: 8px;
   z-index: 30;
   cursor: pointer;
+  max-width: calc(100% - 32px);
+}
+.toast.info {
+  background: #10263a;
+  border-color: var(--accent);
+}
+.toast.warn {
+  background: #3a2a0c;
+  border-color: var(--solo);
 }
 .menu-backdrop {
   position: fixed;

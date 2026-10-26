@@ -31,7 +31,7 @@ export default function App() {
   const [songs, setSongs] = useState<Song[]>(() => demoSongs())
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<{ kind: 'info' | 'warn' | 'error'; text: string } | null>(null)
   const [version, setVersion] = useState(0)
   const [editMode, setEditMode] = useState(false)
   const [setlistOpen, setSetlistOpen] = useState(true)
@@ -58,6 +58,12 @@ export default function App() {
   useEffect(() => {
     engine.fadeSeconds = fadeSeconds
   }, [fadeSeconds])
+
+  useEffect(() => {
+    if (notice?.kind !== 'info') return
+    const t = window.setTimeout(() => setNotice(null), 6000)
+    return () => window.clearTimeout(t)
+  }, [notice])
 
   const song = songs.find((s) => s.id === currentId) ?? null
 
@@ -128,10 +134,12 @@ export default function App() {
 
   const onImport = useCallback(
     async (files: File[]) => {
-      setError(null)
+      setNotice(null)
       setLoading('Decoding stems…')
       try {
-        const s = await importStems(engine.ctx, files)
+        const { song: s, skipped, notes } = await importStems(engine.ctx, files, (done, total, name) =>
+          setLoading(total > 1 ? `Decoding ${done + 1} of ${total}: ${name}` : `Decoding ${name}…`),
+        )
         setSongs((prev) => [...prev, s])
         setLoading(null)
         peaks.current.set(s.id, computePeaks(s.stems, s.duration))
@@ -139,9 +147,13 @@ export default function App() {
         engine.load(s)
         setCurrentId(s.id)
         setEditMode(true)
+        let text = `Imported ${s.stems.length} stem${s.stems.length === 1 ? '' : 's'}`
+        if (notes.length) text += ` · read ${notes.join(', ')} from the files`
+        if (skipped.length) text += `. Skipped ${skipped.map((f) => `${f.name} (${f.reason})`).join(', ')}`
+        setNotice({ kind: skipped.length ? 'warn' : 'info', text })
       } catch (e) {
         setLoading(null)
-        setError(`Couldn't import: ${(e as Error).message}`)
+        setNotice({ kind: 'error', text: `Couldn't import: ${(e as Error).message}` })
       }
     },
     [],
@@ -294,9 +306,9 @@ export default function App() {
           {loading}
         </div>
       )}
-      {error && (
-        <div className="toast" onClick={() => setError(null)}>
-          {error}
+      {notice && (
+        <div className={`toast ${notice.kind}`} onClick={() => setNotice(null)} role="status">
+          {notice.text}
         </div>
       )}
       {dragging && <div className="overlay drop">Drop stems to create a new song</div>}
