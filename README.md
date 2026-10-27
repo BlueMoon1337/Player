@@ -14,6 +14,7 @@ A multitrack backing-track player for live worship and band use, in the spirit o
   - Playback keeps full timing when the window is in the background.
   - Only one copy of the app can run at a time.
   - The window size and position are remembered.
+- **Update button.** Player checks GitHub for new releases and installs signed updates itself (see [Updates](#updates)).
 - **Native menus.** File ▸ Import Stems… (⌘/Ctrl+I), Transport, View (setlist, edit mode, outputs, pad, full screen) and Settings (⌘/Ctrl+,).
 
 ## Features (desktop and web)
@@ -59,22 +60,55 @@ npm run dist:mac     # or dist:win / dist:linux — installers go in release/
 
 Set `PLAYER_LIBRARY_DIR` to use a different library folder, for example for testing.
 
-## Installers
+## Updates
 
-Pushing a version tag (`git tag v0.2.0 && git push --tags`) runs the **Desktop builds** GitHub Actions workflow, which builds:
+The desktop app's **Update** button installs new versions of Player without building anything. It's at the top of **Settings** (⋮), and also in **Player ▸ Check for Updates…** on a Mac and **Help ▸ Check for Updates…** elsewhere.
 
-- a universal macOS `.dmg`
-- a Windows `.exe` installer
-- a Linux `.AppImage`
+1. The first time, it asks for a GitHub token, because the repository is private. Make a [fine-grained token](https://github.com/settings/personal-access-tokens/new) with access to **Only select repositories ▸ Player** and **Contents: Read-only**, and paste it in. Player keeps it in a file in its settings folder, on this computer only.
+2. Player looks for a newer release about 15 seconds after it starts, and every six hours. When there is one, the **Settings** button gets a yellow dot, and Settings says which version is ready.
+3. Open the Update window to see what's new, then click **Install and Restart**. Player:
+   1. downloads the new version
+   2. checks its signature
+   3. replaces itself:
+      - **macOS:** swaps in the new `Player.app`
+      - **Windows:** runs the new installer silently
+      - **Linux:** replaces the AppImage
+   4. starts again
 
-You can also start it by hand from the repo's Actions tab. The installers are attached to the run as artifacts.
+   Your songs, setlist and settings are kept.
 
-The builds are **unsigned**:
+**Publishing a release.** The **Release** GitHub Actions workflow (`.github/workflows/release.yml`) builds Player for macOS (one app for Apple silicon and Intel), Windows and Linux:
 
-- **macOS:** the first time, right-click the app and choose **Open**, or allow it in System Settings ▸ Privacy & Security.
-- **Windows:** SmartScreen shows a warning; choose **More info ▸ Run anyway**.
+1. Raise `version` in `package.json`. Player only offers a release newer than itself.
+2. Push that to `main`. The workflow starts by itself when that version hasn't been released yet. Pushing a tag such as `v0.3.0`, or **Actions ▸ Release ▸ Run workflow** on GitHub, also starts it.
+3. The workflow then:
+   1. makes a draft release, whose notes are the commits since the last one
+   2. builds and signs the three apps into it
+   3. adds `latest.json`, which is what the Update button reads
+   4. publishes the release
 
-Signing needs an Apple Developer ID and a Windows code-signing certificate.
+   A version that has been published can't be used again, so raise it for the next release.
+
+**The signing key.** Updates are signed with an Ed25519 private key, kept as the repository secret `UPDATE_SIGNING_KEY` (**Settings ▸ Secrets and variables ▸ Actions**, the whole `-----BEGIN PRIVATE KEY-----` block). Its public half is `electron/update-key.pem`, and Player refuses any download that isn't signed with it. Keep a copy of the private key somewhere safe: without it, no new version can be published to apps that already have this public key. Until the secret exists, the workflow does nothing and explains why.
+
+**First install, and unsigned apps.** Versions before 0.2.0 have no Update button, so install 0.2.0 or later by hand once from the release's files:
+
+- **macOS:** the `.dmg`
+- **Windows:** `Player-Setup-….exe`
+- **Linux:** the `.AppImage`
+
+The apps aren't signed with an Apple Developer ID or a Windows certificate (macOS builds are ad-hoc signed), so the first time you open one:
+
+- **macOS:** right-click it and choose **Open**, or use **System Settings ▸ Privacy & Security ▸ Open Anyway**.
+- **Windows:** in SmartScreen, choose **More info ▸ Run anyway**.
+
+Updates installed by the Update button don't ask again. If the Update window says macOS is running Player from a temporary, read-only copy (App Translocation, which happens to apps downloaded with a browser):
+
+1. Quit Player and make sure it's in Applications.
+2. Run `xattr -dr com.apple.quarantine /Applications/Player.app` in Terminal once.
+3. Open Player again.
+
+To try updates against a stand-in for GitHub, set `PLAYER_UPDATE_API` to its address. Signatures are still checked.
 
 ## Notes / next steps
 

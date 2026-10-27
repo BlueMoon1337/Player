@@ -866,3 +866,181 @@ button.small {
     width: auto;
   }
 }
+
+/* -------------------------------------------------------------------- updates */
+
+.icon-btn {
+  position: relative;
+}
+.update-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ffd55b;
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.menu-update {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-size: 13px;
+}
+.menu-update.ready {
+  border-color: #ffd55b;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #04121d;
+  font-weight: 600;
+}
+button.link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  padding: 4px 0;
+}
+.menu-backdrop.center {
+  justify-content: center;
+  align-items: center;
+  padding: 16px;
+}
+.dialog {
+  width: 520px;
+  max-width: 100%;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.dialog-head h3 {
+  margin: 0;
+}
+.dialog-close {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+}
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.dialog-actions-spacer {
+  flex: 1;
+}
+.dialog-actions button.primary {
+  padding: 7px 14px;
+}
+.muted {
+  color: var(--muted);
+}
+.update-current {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.update-current img {
+  width: 36px;
+  height: 36px;
+}
+.update-app {
+  font-weight: 700;
+  font-size: 16px;
+}
+.update-status,
+.update-token p {
+  margin: 0;
+}
+.update-error {
+  margin: 0;
+  color: #fca5a5;
+}
+.update-blocked {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #3a2a0c;
+  border: 1px solid var(--solo);
+  font-size: 13px;
+}
+.update-steps {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.update-steps a {
+  color: var(--accent);
+  word-break: break-all;
+}
+.update-command {
+  display: block;
+  margin: 6px 0;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: var(--bg);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+.update-token {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+.update-token-row {
+  display: flex;
+  gap: 8px;
+}
+.update-token-row input {
+  flex: 1;
+  min-width: 0;
+}
+.update-found {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid #ffd55b;
+}
+.update-notes {
+  margin: 8px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--muted);
+}
+.update-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.update-progress progress {
+  width: 100%;
+}

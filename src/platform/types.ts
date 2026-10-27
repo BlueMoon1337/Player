@@ -47,11 +47,26 @@ export type MenuCommand =
   | 'outputs'
   | 'pad'
   | 'settings'
+  | 'check-updates'
 
 export interface MenuState {
   jumpMode: 'immediate' | 'bar' | 'section'
   setlistOpen: boolean
   editMode: boolean
+}
+
+export interface UpdateInfo {
+  version: string
+  hasToken: boolean
+  /** Why updates can't install here: 'translocated' | 'development' | 'not-appimage'. */
+  blocker: string | null
+}
+
+export interface FoundUpdate {
+  version: string
+  current: string
+  notes: string | null
+  date: string | null
 }
 
 export interface DesktopAPI {
@@ -75,6 +90,16 @@ export interface DesktopAPI {
   /** Tells the app audio is running: keeps the display awake and guards against quitting. */
   setActive(active: boolean): void
   setMenuState(state: MenuState): void
+  updates: {
+    info(): Promise<UpdateInfo>
+    /** Keeps the read-only GitHub token in the main process; '' forgets it. */
+    setToken(token: string): Promise<void>
+    /** The newer version, or null when up to date. */
+    check(): Promise<FoundUpdate | null>
+    /** Downloads, verifies, installs and restarts; only returns (by throwing) on failure. */
+    install(): Promise<void>
+    onProgress(cb: (p: { received: number; total: number | null }) => void): () => void
+  }
   onMenu(cb: (cmd: MenuCommand) => void): () => void
 }
 

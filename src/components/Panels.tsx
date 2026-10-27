@@ -336,6 +336,8 @@ interface MenuProps {
   /** Desktop only: where songs are stored. */
   libraryRoot?: string | null
   onRevealLibrary?: () => void
+  /** Desktop only: this version, whether a newer one is ready, and opening the Update window. */
+  update?: { version: string | null; ready: string | null; onOpen: () => void }
   onClose: () => void
 }
 
@@ -346,12 +348,29 @@ export function Menu({
   setFadeSeconds,
   libraryRoot,
   onRevealLibrary,
+  update,
   onClose,
 }: MenuProps) {
   return (
     <div className="menu-backdrop" onClick={onClose}>
       <div className="menu" onClick={(e) => e.stopPropagation()}>
         <h3>Settings</h3>
+        {update && (
+          <div className={`menu-update ${update.ready ? 'ready' : ''}`}>
+            <span>
+              {update.ready ? (
+                <>
+                  <b>Player {update.ready}</b> is ready to install
+                </>
+              ) : (
+                <>Player {update.version ?? ''}</>
+              )}
+            </span>
+            <button className={`small ${update.ready ? 'primary' : ''}`} onClick={update.onOpen}>
+              Update…
+            </button>
+          </div>
+        )}
         <label>
           Section jumps
           <select value={jumpMode} onChange={(e) => setJumpMode(e.target.value as JumpMode)}>

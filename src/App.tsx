@@ -12,6 +12,8 @@ import { Timeline } from './components/Timeline'
 import { Transport } from './components/Transport'
 import { type MenuCommand, desktop } from './platform'
 import { importIntoLibrary, loadSongStems, recordFromSong, songFromRecord } from './platform/library'
+import { checkForUpdates, startUpdateChecks, useUpdates } from './platform/updates'
+import { UpdateDialog } from './components/UpdateDialog'
 
 // One audio graph for the lifetime of the page.
 const engine = new Engine()
@@ -53,6 +55,9 @@ export default function App() {
   const [editMode, setEditMode] = useState(false)
   const [setlistOpen, setSetlistOpen] = useState(true)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [updateOpen, setUpdateOpen] = useState(false)
+  const updates = useUpdates()
+  const updateReady = updates.status === 'available' && updates.found ? updates.found.version : null
   const [panel, setPanel] = useState<'buses' | 'pad' | null>(null)
   const [padOn, setPadOnState] = useState(false)
   const [padKey, setPadKeyState] = useState('C')
@@ -90,6 +95,9 @@ export default function App() {
     const t = window.setTimeout(() => setNotice(null), 6000)
     return () => window.clearTimeout(t)
   }, [notice])
+
+  // Desktop: look for a newer Player soon after start-up and every few hours.
+  useEffect(() => startUpdateChecks(), [])
 
   // Desktop: load the library and setlist from disk.
   useEffect(() => {
@@ -297,6 +305,11 @@ export default function App() {
       setEditMode(false)
       setPanel(cmd === 'outputs' ? 'buses' : 'pad')
     } else if (cmd === 'settings') setMenuOpen(true)
+    else if (cmd === 'check-updates') {
+      setMenuOpen(false)
+      setUpdateOpen(true)
+      void checkForUpdates()
+    }
   }
   useEffect(() => desktop?.onMenu((cmd) => menuHandler.current(cmd)), [])
 
@@ -372,6 +385,7 @@ export default function App() {
         setlistOpen={setlistOpen}
         onSetlist={() => setSetlistOpen(!setlistOpen)}
         onMenu={() => setMenuOpen(true)}
+        updateReady={!!updateReady}
       />
       {setlistOpen && (
         <Setlist
@@ -440,9 +454,23 @@ export default function App() {
           setFadeSeconds={setFadeSeconds}
           libraryRoot={libraryRoot}
           onRevealLibrary={desktop ? () => void desktop!.library.reveal() : undefined}
+          update={
+            desktop
+              ? {
+                  version: updates.version,
+                  ready: updateReady,
+                  onOpen: () => {
+                    setMenuOpen(false)
+                    setUpdateOpen(true)
+                    if (updates.status !== 'available') void checkForUpdates()
+                  },
+                }
+              : undefined
+          }
           onClose={() => setMenuOpen(false)}
         />
       )}
+      {updateOpen && <UpdateDialog playing={state.playing} onClose={() => setUpdateOpen(false)} />}
       {loading && (
         <div className="overlay">
           <div className="spinner" />

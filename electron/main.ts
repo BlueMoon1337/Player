@@ -20,6 +20,7 @@ import { Readable } from 'node:stream'
 import { pathToFileURL } from 'node:url'
 import type { MenuCommand, MenuState, SongRecord } from '../src/platform/types'
 import { Library, assertFileName, assertId } from './library'
+import * as updates from './updates'
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL
 const RENDERER_DIR = path.join(__dirname, '..', 'dist')
@@ -242,6 +243,7 @@ function buildMenu() {
     accelerator: 'CmdOrCtrl+,',
     click: () => send('settings'),
   }
+  const checkUpdates: MenuItemConstructorOptions = { label: 'Check for Updates…', click: () => send('check-updates') }
   // Single-key shortcuts (Space, arrows, F, L, 1-9) are handled by the renderer so they
   // never fire while typing in a text field; the menu just names them.
   const template: MenuItemConstructorOptions[] = [
@@ -251,6 +253,7 @@ function buildMenu() {
             label: app.name,
             submenu: [
               { role: 'about' },
+              checkUpdates,
               sep,
               settings,
               sep,
@@ -326,6 +329,7 @@ function buildMenu() {
       ],
     },
     { role: 'windowMenu' },
+    ...(isMac ? [] : [{ label: 'Help', submenu: [checkUpdates] }]),
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
@@ -394,6 +398,17 @@ function registerIpc() {
       await fsp.rename(dir, parked)
     }
   })
+
+  handle('updates:info', () => ({ version: app.getVersion(), hasToken: updates.hasToken(), blocker: updates.blocker() }))
+  handle('updates:set-token', (token: unknown) => updates.setToken(token))
+  handle('updates:check', () => updates.check())
+  handle('updates:install', () =>
+    updates.install(win, () => {
+      // Restarting into the new version isn't the kind of quit the "still playing?" guard is for.
+      quitConfirmed = true
+      setActive(false)
+    }),
+  )
 
   handle('library:setlist', (ids: string[]) => library.saveSetlist(ids))
 

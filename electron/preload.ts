@@ -16,6 +16,19 @@ const api: DesktopAPI = {
   pathForFile: (file) => webUtils.getPathForFile(file),
   setActive: (active) => ipcRenderer.send('app:active', active),
   setMenuState: (state) => ipcRenderer.send('app:menu-state', state),
+  updates: {
+    info: () => ipcRenderer.invoke('updates:info'),
+    setToken: (token) => ipcRenderer.invoke('updates:set-token', token),
+    check: () => ipcRenderer.invoke('updates:check'),
+    install: () => ipcRenderer.invoke('updates:install'),
+    onProgress: (cb) => {
+      const listener = (_e: Electron.IpcRendererEvent, p: { received: number; total: number | null }) => cb(p)
+      ipcRenderer.on('updates:progress', listener)
+      return () => {
+        ipcRenderer.removeListener('updates:progress', listener)
+      }
+    },
+  },
   onMenu: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, cmd: MenuCommand) => cb(cmd)
     ipcRenderer.on('menu', listener)

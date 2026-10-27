@@ -13,8 +13,16 @@ asar: true
 
 mac:
   category: public.app-category.music
+  # Ad-hoc signed (no Apple Developer ID): without a signature at all, Apple silicon Macs report
+  # the app as damaged. The hardened runtime is only needed for notarization, and with ad-hoc
+  # signing it would reject Electron's own pre-signed frameworks, so it's off.
+  identity: "-"
+  hardenedRuntime: false
   target:
     - target: dmg
+      arch: [universal]
+    # What the Update button downloads and unpacks.
+    - target: zip
       arch: [universal]
   extendInfo:
     # Only used if you click "Show all audio devices" to list interfaces by name.
@@ -25,6 +33,8 @@ win:
     - target: nsis
       arch: [x64]
 nsis:
+  # No spaces: GitHub renames release files with spaces, and the updater looks them up by name.
+  artifactName: Player-Setup-${version}.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
 

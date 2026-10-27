@@ -9,6 +9,7 @@ const common = {
   external: ['electron'],
   sourcemap: true,
   logLevel: 'warning',
+  loader: { '.pem': 'text' },
 }
 
 await Promise.all([

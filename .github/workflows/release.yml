@@ -1,0 +1,135 @@
+# Builds Player for macOS (one app for Apple silicon and Intel), Windows and Linux, signs the
+# update files, and publishes them as a GitHub release that Player's Update button installs from.
+#
+# Runs by itself when a push to main changes package.json (or this file) and its version hasn't
+# been released yet; also when a version tag (v0.3.0) is pushed, or by hand from the Actions tab
+# ("Run workflow"). To release, raise "version" in package.json: Player only offers a release
+# newer than itself, and a published version can't be reused.
+#
+# The release is made as a draft, the builds are added to it, and it's published last with
+# latest.json, so the Update button never sees a half-finished release.
+#
+# Needs one repository secret, UPDATE_SIGNING_KEY: the Ed25519 private key whose public half is
+# electron/update-key.pem (Settings ▸ Secrets and variables ▸ Actions).
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json, .github/workflows/release.yml]
+    tags: ['v*']
+  workflow_dispatch:
+
+# One release at a time.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: release
+        name: Make a draft release, with the changes since the last one as its notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HAS_KEY: ${{ secrets.UPDATE_SIGNING_KEY != '' }}
+        run: |
+          tag="v$(node -p "require('./package.json').version")"
+          if [ "$HAS_KEY" != "true" ]; then
+            echo "::warning::UPDATE_SIGNING_KEY isn't set, so nothing was released. Add it (README ▸ Updates), then run this workflow again."
+            exit 0
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "$tag" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} doesn't match package.json's version ($tag)."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" >/dev/null 2>&1; then
+            # package.json changed without a new version (a new dependency, say): nothing to release.
+            if [ "${GITHUB_REF_TYPE}" = "branch" ] && [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+              echo "::notice::$tag is already released; nothing to do."
+              exit 0
+            fi
+            echo "::error::$tag is already published. Raise the version in package.json."
+            exit 1
+          fi
+          # A draft left by a run that failed is used again.
+          id="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.draft and .tag_name == \"$tag\") | .id" | head -n 1)"
+          if [ -z "$id" ]; then
+            previous="$(git tag --list 'v*' --sort=-v:refname | grep -vx "$tag" | head -n 1 || true)"
+            git log --no-merges --pretty='- %s' ${previous:+$previous..}HEAD > notes.md
+            id="$(gh api "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$tag" -f target_commitish="$GITHUB_SHA" \
+              -f name="Player $tag" -F draft=true -F body=@notes.md --jq .id)"
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: release
+    if: needs.release.outputs.id != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: mac
+            platform: darwin
+          - os: windows-latest
+            target: win
+            platform: win32
+          - os: ubuntu-latest
+            target: linux
+            platform: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run dist:${{ matrix.target }}
+        env:
+          # No Apple / Windows certificates: macOS builds are ad-hoc signed (electron-builder.yml).
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Sign the update file
+        run: node scripts/release.mjs sign ${{ matrix.platform }}
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+      - name: Add the installers to the draft release
+        run: node scripts/release.mjs upload
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.release.outputs.id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-${{ matrix.platform }}
+          path: release/update-${{ matrix.platform }}.json
+
+  publish:
+    needs: [release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          path: signed
+      - name: Add latest.json and publish the release
+        run: node scripts/release.mjs publish signed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.release.outputs.id }}
+          TAG: ${{ needs.release.outputs.tag }}
