@@ -3,17 +3,31 @@ import { Engine, type JumpMode } from './audio/engine'
 import { type ImportResult, fileSource, importStems, isAudioFile } from './audio/importer'
 import { PadPlayer } from './audio/pad'
 import { computePeaks } from './audio/peaks'
-import { demoSongs, renderDemoStems } from './audio/synth'
+import { renderDemoStems } from './audio/synth'
 import { type Song, sectionIndexAt } from './audio/types'
+import { AskHost, ContextMenuHost, isAsking } from './components/Ask'
 import { Mixer } from './components/Mixer'
 import { BusesPanel, EditPanel, Menu, PadPanel } from './components/Panels'
 import { Setlist } from './components/Setlist'
+import { SetlistsMenu, confirmDeleteSong } from './components/SetlistsMenu'
 import { Timeline } from './components/Timeline'
-import { Transport } from './components/Transport'
-import { type MenuCommand, desktop } from './platform'
-import { importIntoLibrary, loadSongStems, recordFromSong, songFromRecord } from './platform/library'
-import { checkForUpdates, startUpdateChecks, useUpdates } from './platform/updates'
+import { type EditMode, Transport } from './components/Transport'
 import { UpdateDialog } from './components/UpdateDialog'
+import { clearNote, redo, undo, useHistory } from './library/history'
+import {
+  currentSetlist,
+  importSongs,
+  loadLibrary,
+  moveInSetlist,
+  onSaveError,
+  removeFromSetlist,
+  setlistSongs,
+  songChanged,
+  useLibrary,
+} from './library/store'
+import { type MenuCommand, desktop } from './platform'
+import { importIntoLibrary, loadSongStems, recordFromSong } from './platform/library'
+import { checkForUpdates, startUpdateChecks, useUpdates } from './platform/updates'
 
 // One audio graph for the lifetime of the page.
 const engine = new Engine()
@@ -42,18 +56,24 @@ function importNotice({ song, skipped, notes }: ImportResult): Notice {
 const progressText = (verb: string) => (done: number, total: number, name: string) =>
   total > 1 ? `${verb} ${done + 1} of ${total}: ${name}` : `${verb} ${name}…`
 
+/** Typing in a field: keys (and ⌘Z) belong to it. */
+const inTextField = (el: Element | null) => !!el?.closest('input, select, textarea')
+
 export default function App() {
   const state = useSyncExternalStore(engine.subscribe, engine.getState)
-  // On desktop the setlist comes from the library folder; the web version starts with the demos.
-  const [songs, setSongs] = useState<Song[]>(() => (desktop ? [] : demoSongs()))
-  const [ready, setReady] = useState(!desktop)
-  const [libraryRoot, setLibraryRoot] = useState<string | null>(null)
+  const lib = useLibrary()
+  const history = useHistory()
+  const setlist = lib.ready ? currentSetlist(lib) : null
+  // The main window plays the current setlist.
+  const songs = useMemo(() => setlistSongs(setlist ?? undefined, lib), [setlist, lib])
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [version, setVersion] = useState(0)
-  const [editMode, setEditMode] = useState(false)
+  const [editMode, setEditMode] = useState<EditMode | null>(null)
+  const lastEditMode = useRef<EditMode>('song')
   const [setlistOpen, setSetlistOpen] = useState(true)
+  const [setlistsOpen, setSetlistsOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [updateOpen, setUpdateOpen] = useState(false)
   const updates = useUpdates()
@@ -69,6 +89,12 @@ export default function App() {
   const [link, setLink] = useState(initial.link)
   const peaks = useRef(new Map<string, Float32Array>())
   const saveTimer = useRef<number | undefined>(undefined)
+
+  const chooseEditMode = (mode: EditMode | null) => {
+    if (mode) lastEditMode.current = mode
+    setEditMode(mode)
+    if (mode) setPanel(null)
+  }
 
   useEffect(() => {
     try {
@@ -96,34 +122,21 @@ export default function App() {
     return () => window.clearTimeout(t)
   }, [notice])
 
+  // The undo note fades after a few seconds.
+  useEffect(() => {
+    if (!history.note) return
+    const t = window.setTimeout(clearNote, 5000)
+    return () => window.clearTimeout(t)
+  }, [history.note])
+
   // Desktop: look for a newer Player soon after start-up and every few hours.
   useEffect(() => startUpdateChecks(), [])
 
-  // Desktop: load the library and setlist from disk.
+  // Load the library (from the library folder on desktop) and its setlists.
   useEffect(() => {
-    if (!desktop) return
-    desktop.library
-      .load()
-      .then(({ root, songs: records, setlist }) => {
-        setLibraryRoot(root)
-        const demos = demoSongs()
-        const all = new Map<string, Song>([...demos, ...records.map(songFromRecord)].map((s) => [s.id, s]))
-        const order = setlist ?? demos.map((d) => d.id)
-        const list = order.map((id) => all.get(id)).filter((s): s is Song => !!s)
-        // Songs added outside a saved setlist (e.g. copied into the folder) go on the end.
-        for (const r of records) if (!order.includes(r.id)) list.push(all.get(r.id)!)
-        setSongs(list)
-      })
-      .catch((e: Error) => setNotice({ kind: 'error', text: `Couldn't open the song library: ${e.message}` }))
-      .finally(() => setReady(true))
+    onSaveError((text) => setNotice({ kind: 'error', text }))
+    loadLibrary().catch((e: Error) => setNotice({ kind: 'error', text: `Couldn't open the song library: ${e.message}` }))
   }, [])
-
-  // Desktop: persist setlist order.
-  const setlistKey = songs.map((s) => s.id).join('|')
-  useEffect(() => {
-    if (!desktop || !ready) return
-    desktop.library.saveSetlist(setlistKey ? setlistKey.split('|') : []).catch(() => {})
-  }, [setlistKey, ready])
 
   // Desktop: keep the display awake and guard quitting while audio runs.
   useEffect(() => {
@@ -131,10 +144,16 @@ export default function App() {
   }, [state.playing, padOn])
 
   useEffect(() => {
-    desktop?.setMenuState({ jumpMode, setlistOpen, editMode })
-  }, [jumpMode, setlistOpen, editMode])
+    desktop?.setMenuState({
+      jumpMode,
+      setlistOpen,
+      editMode: editMode !== null,
+      undoLabel: history.undoLabel,
+      redoLabel: history.redoLabel,
+    })
+  }, [jumpMode, setlistOpen, editMode, history.undoLabel, history.redoLabel])
 
-  const song = songs.find((s) => s.id === currentId) ?? null
+  const song = (currentId && lib.songs[currentId]) || null
 
   useEffect(() => {
     document.title = song ? `${song.title} — Player` : 'Player'
@@ -149,9 +168,10 @@ export default function App() {
     pad.setKey(k)
   }
 
+  /** Loads a library song into the player (rendering or reading its stems first). */
   const selectSong = useCallback(
     async (id: string, autoplay = false) => {
-      const target = songs.find((s) => s.id === id)
+      const target = lib.songs[id]
       if (!target) return
       engine.pause()
       if (target.stems.length === 0 && target.source === 'demo') {
@@ -172,23 +192,33 @@ export default function App() {
         }
       }
       // Demo and library stems can be reloaded at any time, so only keep the current song in memory.
-      for (const s of songs) if (s.id !== id && s.source !== 'user') s.stems = []
+      for (const s of Object.values(lib.songs)) if (s.id !== id && s.source !== 'user') s.stems = []
       if (!peaks.current.has(id)) peaks.current.set(id, computePeaks(target.stems, target.duration))
       engine.load(target)
       setCurrentId(id)
-      engine.sendMidi([0xc0, songs.indexOf(target) & 0x7f])
+      engine.sendMidi([0xc0, Math.max(0, songs.indexOf(target)) & 0x7f])
       if (padFollow) setPadKey(target.key)
       if (autoplay) await engine.play()
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [songs, padFollow],
+    [lib, songs, padFollow],
   )
 
-  // Load the first song once the setlist is known.
+  // Load the first song once the library is ready.
   useEffect(() => {
-    if (ready && !currentId && songs.length) void selectSong(songs[0].id)
+    if (lib.ready && !currentId && songs.length) void selectSong(songs[0].id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready])
+  }, [lib.ready])
+
+  // The loaded song was deleted: stop, and load the first song of the setlist instead.
+  useEffect(() => {
+    if (!currentId || lib.songs[currentId]) return
+    engine.unload()
+    peaks.current.delete(currentId)
+    setCurrentId(null)
+    if (songs.length) void selectSong(songs[0].id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lib.songs, currentId])
 
   // Linked setlist: roll into the next song when one ends.
   useEffect(
@@ -210,6 +240,7 @@ export default function App() {
     [songs, currentId, selectSong],
   )
 
+  /** ← key: back to the start, or to the previous song when already there. */
   const onPrev = useCallback(() => {
     if (engine.position > 2 || !songs.length || songs[0].id === currentId) engine.seek(0)
     else step(-1)
@@ -221,12 +252,13 @@ export default function App() {
     try {
       const result = await job((d, t, n) => setLoading(progressText('Decoding')(d, t, n)))
       const s = result.song
-      setSongs((prev) => [...prev, s])
+      // Into the library, and onto the end of the current setlist.
+      importSongs([s])
       peaks.current.set(s.id, computePeaks(s.stems, s.duration))
       engine.pause()
       engine.load(s)
       setCurrentId(s.id)
-      setEditMode(true)
+      chooseEditMode('song')
       setNotice(importNotice(result))
     } catch (e) {
       setNotice({ kind: 'error', text: `Couldn't import: ${(e as Error).message}` })
@@ -257,8 +289,10 @@ export default function App() {
     [runImport, importPaths],
   )
 
+  const webPicker = useRef<HTMLInputElement>(null)
   const openImport = useCallback(() => {
     if (desktop) void desktop.library.pickStems().then(importPaths)
+    else webPicker.current?.click()
   }, [importPaths])
 
   const toggleCurrentLoop = () => {
@@ -266,18 +300,35 @@ export default function App() {
     if (cur) engine.toggleLoop(cur.sections[sectionIndexAt(cur, engine.position)].id)
   }
 
+  /** ⌘Z: in a text field it undoes the typing; anywhere else, the last library change. */
+  const doUndo = (redoing: boolean) => {
+    if (inTextField(document.activeElement)) document.execCommand(redoing ? 'redo' : 'undo')
+    else void (redoing ? redo() : undo())
+  }
+
   // Keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isAsking()) return
       const t = e.target as HTMLElement
-      if (t.closest('input, select, textarea, [role=slider]') || e.metaKey || e.ctrlKey || e.altKey) return
+      const mod = e.metaKey || e.ctrlKey
+      // Undo / redo, also with the Setlists window open, where deleting happens. (The desktop
+      // app's Edit menu sends these too.)
+      if (mod && !e.altKey && (e.key.toLowerCase() === 'z' || (e.ctrlKey && e.key.toLowerCase() === 'y'))) {
+        if (inTextField(t)) return
+        e.preventDefault()
+        void (e.shiftKey || e.key.toLowerCase() === 'y' ? redo() : undo())
+        return
+      }
+      if (setlistsOpen) return
+      if (inTextField(t) || t.closest('[role=slider]') || mod || e.altKey) return
       const cur = engine.currentSong
       if (e.code === 'Space') {
         e.preventDefault()
         engine.toggle()
       } else if (e.key === 'ArrowLeft') onPrev()
       else if (e.key === 'ArrowRight') step(1)
-      else if (e.key.toLowerCase() === 'f') engine.fadeOut()
+      else if (e.key.toLowerCase() === 'f') engine.toggleFade()
       else if (e.key.toLowerCase() === 'l') toggleCurrentLoop()
       else if (/^[1-9]$/.test(e.key) && cur) {
         const sec = cur.sections[Number(e.key) - 1]
@@ -287,22 +338,24 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onPrev, step, jumpMode])
+  }, [onPrev, step, jumpMode, setlistsOpen])
 
   // Desktop: native menu commands. A ref keeps the handler current without resubscribing.
   const menuHandler = useRef<(cmd: MenuCommand) => void>(() => {})
   menuHandler.current = (cmd) => {
     if (cmd === 'import') openImport()
+    else if (cmd === 'undo' || cmd === 'redo') doUndo(cmd === 'redo')
     else if (cmd === 'toggle-play') engine.toggle()
     else if (cmd === 'prev') onPrev()
     else if (cmd === 'next') step(1)
-    else if (cmd === 'fade') engine.fadeOut()
+    else if (cmd === 'fade') engine.toggleFade()
     else if (cmd === 'loop') toggleCurrentLoop()
     else if (cmd.startsWith('jump:')) setJumpMode(cmd.slice(5) as JumpMode)
     else if (cmd === 'toggle-setlist') setSetlistOpen((v) => !v)
-    else if (cmd === 'toggle-edit') setEditMode((v) => !v)
+    else if (cmd === 'setlists') setSetlistsOpen(true)
+    else if (cmd === 'toggle-edit') chooseEditMode(editMode ? null : lastEditMode.current)
     else if (cmd === 'outputs' || cmd === 'pad') {
-      setEditMode(false)
+      chooseEditMode(null)
       setPanel(cmd === 'outputs' ? 'buses' : 'pad')
     } else if (cmd === 'settings') setMenuOpen(true)
     else if (cmd === 'check-updates') {
@@ -324,6 +377,7 @@ export default function App() {
       if (e.relatedTarget === null) setDragging(false)
     }
     const drop = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes('Files')) return
       e.preventDefault()
       setDragging(false)
       const files = [...(e.dataTransfer?.files ?? [])]
@@ -341,7 +395,7 @@ export default function App() {
 
   const bump = () => {
     setVersion((v) => v + 1)
-    setSongs((s) => [...s])
+    songChanged()
     // Desktop: save edits to the song's folder shortly after the last change.
     if (desktop && song?.source === 'library') {
       const target = song
@@ -354,22 +408,7 @@ export default function App() {
     }
   }
 
-  const removeSong = async (id: string) => {
-    const s = songs.find((x) => x.id === id)
-    if (!s) return
-    if (s.source === 'library') {
-      if (!window.confirm(`Move “${s.title}” and its stems to the Trash?`)) return
-      try {
-        await desktop!.library.deleteSong(id)
-      } catch (e) {
-        setNotice({ kind: 'error', text: `Couldn't remove “${s.title}”: ${(e as Error).message}` })
-        return
-      }
-    }
-    if (id === currentId) engine.pause()
-    setSongs((prev) => prev.filter((x) => x.id !== id))
-    peaks.current.delete(id)
-  }
+  const deleteFromLibrary = (s: Song) => void confirmDeleteSong(s, { playingNow: state.playing && s.id === currentId })
 
   return (
     <div className={`app ${setlistOpen ? '' : 'no-setlist'}`}>
@@ -377,35 +416,29 @@ export default function App() {
         engine={engine}
         state={state}
         song={song}
+        setlistName={setlist?.name ?? null}
         padOn={padOn}
         onPad={() => setPadOn(!padOn)}
-        onPrev={onPrev}
+        onBack={() => engine.seek(0)}
         editMode={editMode}
-        onEdit={() => setEditMode(!editMode)}
-        setlistOpen={setlistOpen}
-        onSetlist={() => setSetlistOpen(!setlistOpen)}
-        onMenu={() => setMenuOpen(true)}
+        onEdit={() => chooseEditMode(editMode ? null : lastEditMode.current)}
+        onEditMode={(m) => chooseEditMode(editMode === m ? null : m)}
+        setlistsOpen={setlistsOpen}
+        onSetlists={() => setSetlistsOpen((v) => !v)}
+        onMore={() => setMenuOpen(true)}
         updateReady={!!updateReady}
       />
       {setlistOpen && (
         <Setlist
           songs={songs}
           currentId={currentId}
-          editMode={editMode}
+          editing={editMode === 'setlist'}
           onSelect={(id) => void selectSong(id)}
           onImport={importFiles}
           onImportClick={desktop ? openImport : undefined}
-          onRemove={(id) => void removeSong(id)}
-          onMove={(id, dir) =>
-            setSongs((prev) => {
-              const i = prev.findIndex((s) => s.id === id)
-              const j = i + dir
-              if (j < 0 || j >= prev.length) return prev
-              const next = [...prev]
-              ;[next[i], next[j]] = [next[j], next[i]]
-              return next
-            })
-          }
+          onRemove={(i) => setlist && removeFromSetlist(setlist.id, i)}
+          onMove={(i, dir) => setlist && moveInSetlist(setlist.id, i, i + dir)}
+          onDelete={deleteFromLibrary}
         />
       )}
       <Timeline
@@ -417,7 +450,7 @@ export default function App() {
         version={version}
       />
       <div className="lower">
-        {editMode && song && <EditPanel engine={engine} song={song} onChange={bump} />}
+        {editMode === 'song' && song && <EditPanel engine={engine} song={song} onChange={bump} />}
         {!editMode && panel === 'buses' && <BusesPanel engine={engine} state={state} />}
         {!editMode && panel === 'pad' && (
           <PadPanel
@@ -439,20 +472,29 @@ export default function App() {
           panel={panel}
           setPanel={(p) => {
             setPanel(p)
-            if (p) setEditMode(false)
+            if (p) setEditMode(null)
           }}
           link={link}
           setLink={setLink}
           padOn={padOn}
         />
       </div>
+      {setlistsOpen && (
+        <SetlistsMenu
+          currentSongId={currentId}
+          playing={state.playing}
+          onLoadSong={(id) => void selectSong(id)}
+          onImport={openImport}
+          onClose={() => setSetlistsOpen(false)}
+        />
+      )}
       {menuOpen && (
         <Menu
           jumpMode={jumpMode}
           setJumpMode={setJumpMode}
           fadeSeconds={fadeSeconds}
           setFadeSeconds={setFadeSeconds}
-          libraryRoot={libraryRoot}
+          libraryRoot={lib.root}
           onRevealLibrary={desktop ? () => void desktop!.library.reveal() : undefined}
           update={
             desktop
@@ -471,6 +513,19 @@ export default function App() {
         />
       )}
       {updateOpen && <UpdateDialog playing={state.playing} onClose={() => setUpdateOpen(false)} />}
+      {/* The web version's file picker, for Import in the Setlists menu. */}
+      <input
+        ref={webPicker}
+        type="file"
+        accept="audio/*,.wav,.wave,.bwf,.rf64,.mp3,.m4a,.aif,.aiff,.flac,.ogg"
+        multiple
+        hidden
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])]
+          e.target.value = ''
+          if (files.length) importFiles(files)
+        }}
+      />
       {loading && (
         <div className="overlay">
           <div className="spinner" />
@@ -482,7 +537,19 @@ export default function App() {
           {notice.text}
         </div>
       )}
+      {history.note && (
+        <div className="undo-note" key={history.note.seq} role="status">
+          <span>{history.note.text}</span>
+          {history.note.undoable && history.undoLabel && (
+            <button className="small" onClick={() => void undo()}>
+              Undo
+            </button>
+          )}
+        </div>
+      )}
       {dragging && <div className="overlay drop">Drop stems to create a new song</div>}
+      <AskHost />
+      <ContextMenuHost />
     </div>
   )
 }

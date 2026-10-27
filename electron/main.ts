@@ -18,7 +18,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pathToFileURL } from 'node:url'
-import type { MenuCommand, MenuState, SongRecord } from '../src/platform/types'
+import type { LibraryState, MenuCommand, MenuState, SongRecord } from '../src/platform/types'
 import { Library, assertFileName, assertId } from './library'
 import * as updates from './updates'
 
@@ -69,7 +69,7 @@ let library: Library
 let active = false
 let quitConfirmed = false
 let sleepBlocker: number | null = null
-let menuState: MenuState = { jumpMode: 'bar', setlistOpen: true, editMode: false }
+let menuState: MenuState = { jumpMode: 'bar', setlistOpen: true, editMode: false, undoLabel: null, redoLabel: null }
 
 function libraryRoot() {
   return process.env.PLAYER_LIBRARY_DIR || path.join(app.getPath('documents'), 'Player Library')
@@ -277,14 +277,35 @@ function buildMenu() {
         ...(isMac ? [] : [sep, settings, sep, { role: 'quit' } as MenuItemConstructorOptions]),
       ],
     },
-    { role: 'editMenu' },
+    {
+      // Undo and Redo go to Player, which undoes typing in a text field and library changes
+      // anywhere else (named after the step, as Lumen does).
+      label: 'Edit',
+      submenu: [
+        {
+          label: menuState.undoLabel ? `Undo ${menuState.undoLabel}` : 'Undo',
+          accelerator: 'CmdOrCtrl+Z',
+          click: () => send('undo'),
+        },
+        {
+          label: menuState.redoLabel ? `Redo ${menuState.redoLabel}` : 'Redo',
+          accelerator: isMac ? 'Shift+Cmd+Z' : 'Ctrl+Y',
+          click: () => send('redo'),
+        },
+        sep,
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
     {
       label: 'Transport',
       submenu: [
         { label: 'Play / Pause (Space)', click: () => send('toggle-play') },
         { label: 'Back / Previous Song (←)', click: () => send('prev') },
         { label: 'Next Song (→)', click: () => send('next') },
-        { label: 'Fade Out (F)', click: () => send('fade') },
+        { label: 'Fade In / Out (F)', click: () => send('fade') },
         { label: 'Loop Current Section (L)', click: () => send('loop') },
         sep,
         {
@@ -321,6 +342,7 @@ function buildMenu() {
           accelerator: 'CmdOrCtrl+E',
           click: () => send('toggle-edit'),
         },
+        { label: 'Setlists & Library…', accelerator: 'CmdOrCtrl+L', click: () => send('setlists') },
         { label: 'Outputs…', accelerator: 'CmdOrCtrl+Shift+O', click: () => send('outputs') },
         { label: 'Pad Player', accelerator: 'CmdOrCtrl+Shift+P', click: () => send('pad') },
         sep,
@@ -386,18 +408,12 @@ function registerIpc() {
     return library.removeFiles(id, files)
   })
 
-  handle('library:delete', async (id: unknown) => {
+  handle('library:delete', (id: unknown) => {
     assertId(id)
-    const dir = library.songDir(id)
-    try {
-      await shell.trashItem(dir)
-    } catch {
-      // No system trash (some Linux setups): park it in the library instead of deleting.
-      const parked = path.join(library.root, '.Deleted', id)
-      await fsp.mkdir(path.dirname(parked), { recursive: true })
-      await fsp.rename(dir, parked)
-    }
+    return library.deleteSong(id)
   })
+  handle('library:restore', (id: unknown) => library.restoreSong(id as string))
+  handle('library:save-state', (state: LibraryState) => library.saveState(state))
 
   handle('updates:info', () => ({ version: app.getVersion(), hasToken: updates.hasToken(), blocker: updates.blocker() }))
   handle('updates:set-token', (token: unknown) => updates.setToken(token))
@@ -410,7 +426,6 @@ function registerIpc() {
     }),
   )
 
-  handle('library:setlist', (ids: string[]) => library.saveSetlist(ids))
 
   handle('library:reveal', async (id?: unknown) => {
     if (id === undefined) return void (await shell.openPath(library.root))
@@ -428,12 +443,26 @@ function registerIpc() {
       jumpMode: s.jumpMode === 'immediate' || s.jumpMode === 'section' ? s.jumpMode : 'bar',
       setlistOpen: s.setlistOpen !== false,
       editMode: s.editMode === true,
+      undoLabel: typeof s.undoLabel === 'string' ? s.undoLabel.slice(0, 80) : null,
+      redoLabel: typeof s.redoLabel === 'string' ? s.redoLabel.slice(0, 80) : null,
     }
     buildMenu()
   })
 }
 
 // --------------------------------------------------------------- lifecycle
+
+/** Songs deleted last session (kept so Undo could restore them) go to the system trash now. */
+async function emptyLibraryTrash() {
+  for (const dir of await library.trashedSongs()) {
+    try {
+      await shell.trashItem(dir)
+    } catch {
+      // No system trash (some Linux setups): delete it.
+      await fsp.rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
+  }
+}
 
 function setupPermissions() {
   const ses = session.defaultSession
@@ -464,6 +493,7 @@ if (!app.requestSingleInstanceLock()) {
 
   void app.whenReady().then(() => {
     library = new Library(libraryRoot())
+    void emptyLibraryTrash()
     registerAppProtocol()
     setupPermissions()
     registerIpc()

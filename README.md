@@ -6,7 +6,7 @@ A multitrack backing-track player for live worship and band use, in the spirit o
 
 ## Desktop features
 
-- **Song library on disk.** Imported stems are copied into `Documents/Player Library`. Each song gets its own folder holding its stems and a `song.json` with its settings and sections. The setlist order is saved in `library.json`. Edits save automatically, and stems load from disk when you select a song. Removing a song moves its folder to the system Trash.
+- **Song library on disk.** Imported stems are copied into `Documents/Player Library`. Each song gets its own folder holding its stems and a `song.json` with its settings and sections. Setlists are saved in `library.json`. Edits save automatically, and stems load from disk when you select a song. A deleted song is kept until the next launch so it can be undone (see [Deleting and Undo](#deleting-and-undo)).
 - **Audio interface support.** In **Buses → Outputs**, choose the audio device. Every output the device exposes becomes routable: send any channel to Main 1/2, to another pair (Out 3/4, 5/6, …), or to a single output in mono. A typical setup sends click and guide to Out 3/4 for in-ears and tracks to Main for front-of-house, and there's a one-click preset for it. The chosen device is remembered and reconnected the next time it's plugged in.
 - **Built for live use.**
   - The display stays awake while audio is playing.
@@ -15,14 +15,27 @@ A multitrack backing-track player for live worship and band use, in the spirit o
   - Only one copy of the app can run at a time.
   - The window size and position are remembered.
 - **Update button.** Player checks GitHub for new releases and installs signed updates itself (see [Updates](#updates)).
-- **Native menus.** File ▸ Import Stems… (⌘/Ctrl+I), Transport, View (setlist, edit mode, outputs, pad, full screen) and Settings (⌘/Ctrl+,).
+- **Native menus.** File ▸ Import Stems… (⌘/Ctrl+I), Edit (Undo and Redo, named after the step), Transport, View (Setlists & Library ⌘/Ctrl+L, setlist row, edit mode, outputs, pad, full screen) and Settings (⌘/Ctrl+,).
 
 ## Features (desktop and web)
 
 - **Sample-synced stems.** Every stem and click channel is an `AudioBufferSourceNode` started at the same audio-clock time. Loops and jumps restart them all together, so they never drift.
 - **Generated click.** Accent, 1/4, 1/8 and 1/16 channels are rendered from the song's BPM, time signature and click offset, then summed into a Click bus.
 - **Section timeline.** A colour-coded waveform with section markers. Click a section to jump to it, either immediately, at the next bar, or at the end of the section. Each section has its own loop toggle, and you can click the waveform to seek.
-- **Transport.** BPM, time signature, key, elapsed and total time, previous, play/pause, and a fade-out button whose length you can configure.
+- **Transport Area**, laid out like Playback's. From left to right:
+  - **Tempo and time signature** of the loaded song (blank when no song is loaded).
+  - **Time display:** where the song is now, large, with its start / end points underneath.
+  - **PAD**, which turns the ambient pad on and off.
+  - **Back To Start**, **Play / Pause**, and **Fade**. Fade brings the tracks in from a stop, fades them out while playing, and turns a fade-out back up if pressed again. Its length is set in Settings.
+  - **EDIT.** Click to turn editing on or off; press and hold (or right-click) to choose **Song** (sections, tempo, key, click) or **Setlist** (reorder and remove songs).
+  - **Setlists Menu**, then the **More Menu** (≡) for settings, updates and the library folder.
+
+  The current setlist's name is shown above the buttons.
+- **Library and setlists.** Every song, imported or demo, lives in the library. Setlists are named, ordered lists of library songs, and the main window plays the current one. Open them with the Setlists Menu button:
+  - **All Songs:** search the library, and **+ Add** a song to the current setlist (or double-click it).
+  - **Setlists:** **+** makes one, and clicking one makes it current. Double-click a setlist to rename it, or right-click it to rename, duplicate or delete it.
+  - **In a setlist:** drag songs to reorder them, and double-click a song to load it.
+  - **Importing** adds the new song to the library and to the end of the current setlist.
 - **Mixer.** Faders with meters, mute and solo for each channel, and a master fader with a limiter. Levels are saved between sessions.
 - **Side buttons.**
   - **Pad Player** is an ambient pad that keeps playing between songs and can follow the song's key.
@@ -36,6 +49,24 @@ A multitrack backing-track player for live worship and band use, in the spirit o
   Other formats (MP3, AAC/M4A, FLAC, OGG, AIFF) use the built-in decoder. Files that can't be decoded are skipped, and the app says why.
 - **Demo songs.** Three synthesized demo songs are included, so the app works without any setup.
 
+## Deleting and Undo
+
+Deleting works as in Lumen. Everything can be deleted from its trash button, its right-click menu, or the **Delete** (⌫) key:
+
+| What | How |
+| --- | --- |
+| A song in a setlist | Select it and press Delete, or click its **−**. It comes out of the setlist straight away, and stays in the library. |
+| A song in the library | Select it and press Delete, or click its trash button. Player asks first, saying which setlists it comes out of and whether it's playing. If it is playing, playback stops. |
+| A setlist | Its trash button, or right-click ▸ Delete Setlist…. A setlist with songs asks first (the songs stay in the library); an empty one goes straight away. |
+
+Everything above, plus adding, moving, renaming and importing, can be undone:
+
+- **⌘Z** (Ctrl+Z) undoes and **⇧⌘Z** (Ctrl+Shift+Z or Ctrl+Y) redoes, up to 200 steps until Player closes.
+- A note at the bottom of the window says what was done or undone, with an **Undo** button after a deletion.
+- In a text field, ⌘Z undoes the typing instead.
+- A deleted song's files are kept in the library's hidden `.Trash` folder until Player next starts, so undo can bring them back. After that, they go to the system Trash.
+- Player's questions are its own windows: Return answers yes and Escape answers no.
+
 The web version keeps imported songs in memory only. It can choose an output device only in browsers that support `AudioContext.setSinkId`.
 
 ## Keyboard
@@ -46,7 +77,10 @@ The web version keeps imported songs in memory only. It can choose an output dev
 | ← / → | Previous (or back to start) / next song |
 | 1–9 | Jump to section |
 | L | Loop current section |
-| F | Fade out |
+| F | Fade in (from a stop) / out |
+| ⌘Z / ⇧⌘Z | Undo / redo (Ctrl+Z / Ctrl+Y) |
+| ⌘L | Setlists & library (desktop) |
+| Delete | In the Setlists window: remove from setlist, or delete from library |
 
 ## Development
 

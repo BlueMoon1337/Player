@@ -88,7 +88,7 @@ export function Mixer({ engine, state, panel, setPanel, link, setLink, padOn }: 
       <div className="mixer-strips">
         <div className="strip-group click-group">{clicks.map(strip)}</div>
         <div className="strip-group stem-group">
-          {stems.length ? stems.map(strip) : <div className="empty">Loading stems…</div>}
+          {stems.length ? stems.map(strip) : <div className="empty">{engine.currentSong ? 'Loading stems…' : 'No song loaded'}</div>}
         </div>
         <div className="strip-group master-group">
           <div className="strip master">

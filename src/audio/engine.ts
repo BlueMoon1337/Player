@@ -49,7 +49,8 @@ export interface EngineState {
   playing: boolean
   loop: Loop | null
   pendingJump: PendingJump | null
-  fading: boolean
+  /** A fade in progress: in (from Fade while stopped) or out (Fade while playing). */
+  fade: 'in' | 'out' | null
   channels: { id: string; name: string; group: 'click' | 'stem'; settings: ChannelSettings }[]
   masterVolume: number
   /** Channels on the current output device (2 for plain stereo). */
@@ -106,7 +107,7 @@ export class Engine {
   private pausedPos = 0
   private loop: Loop | null = null
   private pendingJump: PendingJump | null = null
-  private fading = false
+  private fading: 'in' | 'out' | null = null
   private fadeTimer: number | undefined
   private masterVolume = 0.75
   private listeners = new Set<() => void>()
@@ -181,7 +182,7 @@ export class Engine {
       input.channelCountMode = 'explicit'
     }
     const fade = ctx.createGain()
-    fade.gain.value = this.fading ? 0 : 1
+    fade.gain.value = this.fading === 'out' ? 0 : 1
     const master = ctx.createGain()
     master.gain.value = faderToGain(this.masterVolume)
     const limiter = ctx.createDynamicsCompressor()
@@ -360,6 +361,28 @@ export class Engine {
     this.emit()
   }
 
+  /** Stops and lets go of the current song (e.g. it was deleted). */
+  unload() {
+    this.stopSources()
+    this.playing = false
+    this.pausedPos = 0
+    this.loop = null
+    this.pendingJump = null
+    this.song = null
+    for (const id of [...this.order]) {
+      const ch = this.channels.get(id)!
+      if (ch.group === 'stem') {
+        ch.gain.disconnect()
+        ch.panner.disconnect()
+        this.channels.delete(id)
+        this.order = this.order.filter((o) => o !== id)
+      } else {
+        ch.buffer = null
+      }
+    }
+    this.emit()
+  }
+
   /** Re-renders the click after tempo / meter / offset changes. */
   regenerateClick() {
     if (!this.song) return
@@ -442,7 +465,7 @@ export class Engine {
   async play() {
     if (!this.song || this.playing) return
     if (this.ctx.state !== 'running') await this.ctx.resume()
-    this.cancelFade()
+    if (this.fading !== 'in') this.cancelFade()
     if (this.pausedPos >= this.song.duration - 0.05) this.pausedPos = 0
     this.startSources(this.pausedPos, this.ctx.currentTime + 0.04)
     this.prevBase = null
@@ -566,18 +589,55 @@ export class Engine {
     this.setLoop(this.loop?.sectionId === sectionId ? null : sectionId)
   }
 
-  fadeOut(seconds = this.fadeSeconds) {
-    if (!this.playing || this.fading) return
-    this.fading = true
+  /** Ramps every output's fade stage from where it is now to `to` over `seconds`. */
+  private rampFade(to: number, seconds: number, from?: number) {
     const now = this.ctx.currentTime
     for (const { fade } of this.outputs.values()) {
       fade.gain.cancelScheduledValues(now)
-      fade.gain.setValueAtTime(fade.gain.value, now)
-      fade.gain.linearRampToValueAtTime(0, now + seconds)
+      fade.gain.setValueAtTime(from ?? fade.gain.value, now)
+      fade.gain.linearRampToValueAtTime(to, now + seconds)
     }
+  }
+
+  fadeOut(seconds = this.fadeSeconds) {
+    if (!this.playing || this.fading === 'out') return
+    window.clearTimeout(this.fadeTimer)
+    this.fading = 'out'
+    this.rampFade(0, seconds)
     this.fadeTimer = window.setTimeout(() => {
       this.pause()
     }, seconds * 1000 + 50)
+    this.emit()
+  }
+
+  /** Starts playback from silence and brings the tracks up over `seconds`. */
+  async fadeIn(seconds = this.fadeSeconds) {
+    if (!this.song || this.playing) return
+    if (this.ctx.state !== 'running') await this.ctx.resume()
+    window.clearTimeout(this.fadeTimer)
+    this.fading = 'in'
+    this.rampFade(1, seconds, 0)
+    await this.play()
+    this.fadeTimer = window.setTimeout(() => {
+      this.fading = null
+      this.emit()
+    }, seconds * 1000)
+  }
+
+  /**
+   * The Fade button: fades in from a stop, fades out while playing, and turns a fade-out
+   * that's under way back up.
+   */
+  toggleFade(seconds = this.fadeSeconds) {
+    if (!this.playing) return void this.fadeIn(seconds)
+    if (this.fading !== 'out') return this.fadeOut(seconds)
+    window.clearTimeout(this.fadeTimer)
+    this.fading = 'in'
+    this.rampFade(1, seconds / 2)
+    this.fadeTimer = window.setTimeout(() => {
+      this.fading = null
+      this.emit()
+    }, (seconds / 2) * 1000)
     this.emit()
   }
 
@@ -588,7 +648,7 @@ export class Engine {
       fade.gain.cancelScheduledValues(now)
       fade.gain.setValueAtTime(1, now)
     }
-    this.fading = false
+    this.fading = null
   }
 
   onEnded(fn: () => void) {
@@ -651,7 +711,7 @@ export class Engine {
       playing: this.playing,
       loop: this.loop,
       pendingJump: this.pendingJump,
-      fading: this.fading,
+      fade: this.fading,
       masterVolume: this.masterVolume,
       outputCount: this.outputCount,
       outputDeviceId: this.outputDeviceId,

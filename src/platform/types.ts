@@ -16,12 +16,27 @@ export interface SongRecord {
   stems: { id: string; name: string; file: string }[]
 }
 
+export interface SetlistRecord {
+  id: string
+  name: string
+  /** Song ids in order (demo songs are `demo-N`). */
+  songs: string[]
+}
+
+/** What library.json keeps (version 2). */
+export interface LibraryState {
+  setlists: SetlistRecord[]
+  currentSetlist: string | null
+  /** Demo songs deleted from the library. */
+  hiddenDemos: string[]
+}
+
 export interface LibraryData {
   /** Absolute path of the library folder. */
   root: string
   songs: SongRecord[]
-  /** Setlist order as song ids (demo songs are `demo-N`). Null until the first save. */
-  setlist: string[] | null
+  /** Null until the first save. */
+  state: LibraryState | null
 }
 
 export interface CreatedSong {
@@ -48,11 +63,17 @@ export type MenuCommand =
   | 'pad'
   | 'settings'
   | 'check-updates'
+  | 'setlists'
+  | 'undo'
+  | 'redo'
 
 export interface MenuState {
   jumpMode: 'immediate' | 'bar' | 'section'
   setlistOpen: boolean
   editMode: boolean
+  /** What Edit ▸ Undo / Redo would do, e.g. "Delete “Grace Song”". */
+  undoLabel?: string | null
+  redoLabel?: string | null
 }
 
 export interface UpdateInfo {
@@ -79,9 +100,10 @@ export interface DesktopAPI {
     createSong(paths: string[]): Promise<CreatedSong>
     saveSong(record: SongRecord): Promise<void>
     removeFiles(songId: string, files: string[]): Promise<void>
-    /** Moves the song folder to the OS trash. */
+    /** Deletes a song; it can be restored until Player next starts (Undo). */
     deleteSong(songId: string): Promise<void>
-    saveSetlist(ids: string[]): Promise<void>
+    restoreSong(songId: string): Promise<SongRecord>
+    saveState(state: LibraryState): Promise<void>
     /** Opens the library folder, or a song's folder, in the file manager. */
     reveal(songId?: string): Promise<void>
   }

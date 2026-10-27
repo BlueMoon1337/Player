@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { confirmDialog } from './Ask'
 import { REPOSITORY_NAME, checkForUpdates, installUpdate, progressText, saveToken, useUpdates } from '../platform/updates'
 
 const TOKEN_PAGE = 'https://github.com/settings/personal-access-tokens/new'
@@ -115,12 +116,14 @@ export function UpdateDialog({ onClose, playing }: { onClose: () => void; playin
   const [replacing, setReplacing] = useState(false)
   const busy = u.status === 'installing'
 
-  const install = () => {
-    const ok = window.confirm(
-      `Install Player ${u.found?.version}?\n\nPlayer will download it, install it and restart${
+  const install = async () => {
+    const ok = await confirmDialog({
+      title: `Install Player ${u.found?.version}?`,
+      message: `Player will download it, install it and restart${
         playing ? ', which stops the audio that’s playing now' : ''
-      }. Your songs, setlist and settings stay as they are.`,
-    )
+      }. Your songs, setlists and settings stay as they are.`,
+      confirmLabel: 'Install and Restart',
+    })
     if (ok) void installUpdate()
   }
 
@@ -186,7 +189,7 @@ export function UpdateDialog({ onClose, playing }: { onClose: () => void; playin
               </button>
               <span className="dialog-actions-spacer" />
               {u.status === 'available' || u.status === 'installing' ? (
-                <button className="primary" disabled={busy || !!u.blocker} onClick={install}>
+                <button className="primary" disabled={busy || !!u.blocker} onClick={() => void install()}>
                   {busy ? 'Installing…' : 'Install and Restart'}
                 </button>
               ) : (
