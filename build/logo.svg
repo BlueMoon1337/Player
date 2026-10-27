@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="306 306 668 668">
+  <!-- Hand-drawn look: fills are deliberately out of register with their outlines. -->
+  <circle cx="633" cy="640" r="300" fill="#FFFFFF"/>
+  <circle cx="656.6" cy="642" r="304.3" fill="#FFD55B"/>
+  <path d="M583 494.6 L583 757.7 L809.8 626.1 Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="8" stroke-linejoin="round"/>
+  <circle cx="633" cy="640" r="305" fill="none" stroke="#333333" stroke-width="21"/>
+  <path d="M552.5 500 L552.5 780 L794 640 Z" fill="none" stroke="#333333" stroke-width="21" stroke-linejoin="round"/>
+</svg>

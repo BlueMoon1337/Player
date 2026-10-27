@@ -1,3 +1,5 @@
+<img src="build/logo.svg" alt="Player logo" width="96">
+
 # Player
 
 A multitrack backing-track player for live worship and band use, in the spirit of Playback. Player is a desktop app for macOS, Windows and Linux, built with Electron, React, TypeScript and the Web Audio API. The same UI also runs as a web page, but with fewer features.
