@@ -9,7 +9,15 @@ export interface Step {
   label: string
   undo: () => void | Promise<void>
   redo: () => void | Promise<void>
+  /**
+   * Steps with the same key, recorded within a moment of each other (typing into one field),
+   * join into one: undo goes back to before the first, redo forward to after the last.
+   */
+  mergeKey?: string
 }
+
+const MERGE_WINDOW_MS = 1500
+let lastRecordedAt = 0
 
 const LIMIT = 200
 let done: Step[] = []
@@ -45,6 +53,15 @@ export function useHistory(): HistoryState {
 
 /** Records a change that has just been made. */
 export function record(step: Step) {
+  const last = done.at(-1)
+  const now = Date.now()
+  if (step.mergeKey && last?.mergeKey === step.mergeKey && !undone.length && now - lastRecordedAt < MERGE_WINDOW_MS) {
+    last.redo = step.redo
+    lastRecordedAt = now
+    refresh()
+    return
+  }
+  lastRecordedAt = now
   done.push(step)
   if (done.length > LIMIT) done.shift()
   undone = []

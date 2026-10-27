@@ -14,6 +14,7 @@ import { Timeline } from './components/Timeline'
 import { type EditMode, Transport } from './components/Transport'
 import { UpdateDialog } from './components/UpdateDialog'
 import { clearNote, redo, undo, useHistory } from './library/history'
+import { editSong, onSongChanged } from './library/songEdits'
 import {
   currentSetlist,
   importSongs,
@@ -88,7 +89,7 @@ export default function App() {
   const [fadeSeconds, setFadeSeconds] = useState(initial.fadeSeconds)
   const [link, setLink] = useState(initial.link)
   const peaks = useRef(new Map<string, Float32Array>())
-  const saveTimer = useRef<number | undefined>(undefined)
+  const saveTimers = useRef(new Map<string, number>())
 
   const chooseEditMode = (mode: EditMode | null) => {
     if (mode) lastEditMode.current = mode
@@ -393,20 +394,30 @@ export default function App() {
     }
   }, [importFiles])
 
-  const bump = () => {
-    setVersion((v) => v + 1)
-    songChanged()
-    // Desktop: save edits to the song's folder shortly after the last change.
-    if (desktop && song?.source === 'library') {
-      const target = song
-      window.clearTimeout(saveTimer.current)
-      saveTimer.current = window.setTimeout(() => {
-        desktop!.library.saveSong(recordFromSong(target)).catch((e: Error) =>
-          setNotice({ kind: 'error', text: `Couldn't save “${target.title}”: ${e.message}` }),
+  // After an edit to a song (or undoing / redoing one): update the engine if it's loaded,
+  // refresh the views, and save it to its folder (desktop) shortly after the last change.
+  useEffect(
+    () =>
+      onSongChanged((changed, timing) => {
+        if (engine.currentSong === changed) {
+          if (timing) engine.regenerateClick()
+          engine.sectionsChanged()
+        }
+        setVersion((v) => v + 1)
+        songChanged()
+        if (!desktop || changed.source !== 'library') return
+        window.clearTimeout(saveTimers.current.get(changed.id))
+        saveTimers.current.set(
+          changed.id,
+          window.setTimeout(() => {
+            desktop!.library.saveSong(recordFromSong(changed)).catch((e: Error) =>
+              setNotice({ kind: 'error', text: `Couldn't save “${changed.title}”: ${e.message}` }),
+            )
+          }, 400),
         )
-      }, 400)
-    }
-  }
+      }),
+    [],
+  )
 
   const deleteFromLibrary = (s: Song) => void confirmDeleteSong(s, { playingNow: state.playing && s.id === currentId })
 
@@ -450,7 +461,9 @@ export default function App() {
         version={version}
       />
       <div className="lower">
-        {editMode === 'song' && song && <EditPanel engine={engine} song={song} onChange={bump} />}
+        {editMode === 'song' && song && (
+          <EditPanel engine={engine} song={song} edit={(label, change, field) => editSong(song, label, change, field)} />
+        )}
         {!editMode && panel === 'buses' && <BusesPanel engine={engine} state={state} />}
         {!editMode && panel === 'pad' && (
           <PadPanel

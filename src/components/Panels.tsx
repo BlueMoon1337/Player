@@ -172,7 +172,8 @@ export function PadPanel({ pad, padOn, setPadOn, followSong, setFollowSong, padK
 interface EditProps {
   engine: Engine
   song: Song
-  onChange: () => void
+  /** Makes one undoable edit; `field` joins a burst of typing into one step. */
+  edit: (label: string, change: () => void, field?: string) => void
 }
 
 const SECTION_NAMES = [
@@ -193,29 +194,58 @@ const SECTION_NAMES = [
   'Ending',
 ]
 
-export function EditPanel({ engine, song, onChange }: EditProps) {
-  const update = (patch: Partial<Song>, regenClick = false) => {
-    Object.assign(song, patch)
-    if (regenClick) engine.regenerateClick()
-    onChange()
-  }
-  const sortSections = () => {
-    song.sections.sort((a, b) => a.start - b.start)
-    engine.sectionsChanged()
-    onChange()
-  }
+/**
+ * A number box you can type into freely: it shows what's typed, applies each value that's in
+ * range as you go, and shows the real value again when you leave it.
+ */
+function NumberField({
+  value,
+  min,
+  max,
+  step,
+  onValue,
+}: {
+  value: number
+  min: number
+  max: number
+  step: number
+  onValue: (v: number) => void
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={draft ?? value}
+      onChange={(e) => {
+        setDraft(e.target.value)
+        const v = Number(e.target.value)
+        if (e.target.value.trim() !== '' && v >= min && v <= max) onValue(v)
+      }}
+      onBlur={() => setDraft(null)}
+    />
+  )
+}
+
+export function EditPanel({ engine, song, edit }: EditProps) {
+  const sortSections = () => song.sections.sort((a, b) => a.start - b.start)
   return (
     <div className="panel edit-panel">
       <div className="panel-head">
         <h3>Edit song</h3>
         <label>
           Title
-          <input value={song.title} onChange={(e) => update({ title: e.target.value })} />
+          <input
+            value={song.title}
+            onChange={(e) => edit('Rename Song', () => (song.title = e.target.value), 'title')}
+          />
         </label>
         <div className="row">
           <label>
             Key
-            <select value={song.key} onChange={(e) => update({ key: e.target.value })}>
+            <select value={song.key} onChange={(e) => edit('Change Key', () => (song.key = e.target.value))}>
               {KEYS.map((k) => (
                 <option key={k}>{k}</option>
               ))}
@@ -223,23 +253,21 @@ export function EditPanel({ engine, song, onChange }: EditProps) {
           </label>
           <label>
             BPM
-            <input
-              type="number"
+            <NumberField
               min={30}
               max={300}
               step={0.1}
               value={song.bpm}
-              onChange={(e) => {
-                const v = Number(e.target.value)
-                if (v >= 30 && v <= 300) update({ bpm: v }, true)
-              }}
+              onValue={(v) => edit('Change Tempo', () => (song.bpm = v), 'bpm')}
             />
           </label>
           <label>
             Time sig
             <select
               value={song.timeSig.join('/')}
-              onChange={(e) => update({ timeSig: e.target.value.split('/').map(Number) as [number, number] }, true)}
+              onChange={(e) =>
+                edit('Change Time Signature', () => (song.timeSig = e.target.value.split('/').map(Number) as [number, number]))
+              }
             >
               {['2/4', '3/4', '4/4', '5/4', '6/8', '12/8'].map((t) => (
                 <option key={t}>{t}</option>
@@ -248,12 +276,12 @@ export function EditPanel({ engine, song, onChange }: EditProps) {
           </label>
           <label title="Where bar 1 beat 1 falls in the audio, in seconds">
             Click offset
-            <input
-              type="number"
+            <NumberField
               min={0}
+              max={Math.max(0, song.duration - 0.1)}
               step={0.001}
               value={song.clickOffset}
-              onChange={(e) => update({ clickOffset: Math.max(0, Number(e.target.value)) }, true)}
+              onValue={(v) => edit('Change Click Offset', () => (song.clickOffset = v), 'click-offset')}
             />
           </label>
         </div>
@@ -262,8 +290,10 @@ export function EditPanel({ engine, song, onChange }: EditProps) {
           onClick={() => {
             const at = engine.position
             if (song.sections.some((s) => Math.abs(s.start - at) < 0.05)) return
-            song.sections.push({ id: uid('sec'), name: 'Verse 1', start: at })
-            sortSections()
+            edit('Add Section', () => {
+              song.sections.push({ id: uid('sec'), name: 'Verse 1', start: at })
+              sortSections()
+            })
           }}
         >
           + Section at playhead
@@ -275,10 +305,7 @@ export function EditPanel({ engine, song, onChange }: EditProps) {
             <input
               list="section-names"
               value={s.name}
-              onChange={(e) => {
-                s.name = e.target.value
-                onChange()
-              }}
+              onChange={(e) => edit('Rename Section', () => (s.name = e.target.value), `section-name:${s.id}`)}
             />
             <input
               type="number"
@@ -286,33 +313,37 @@ export function EditPanel({ engine, song, onChange }: EditProps) {
               min={0}
               value={Math.round(s.start * 1000) / 1000}
               disabled={i === 0}
-              onChange={(e) => {
-                s.start = Math.max(0, Math.min(song.duration - 0.1, Number(e.target.value)))
-                engine.sectionsChanged()
-                onChange()
-              }}
-              onBlur={sortSections}
+              onChange={(e) =>
+                edit(
+                  'Move Section',
+                  () => (s.start = Math.max(0, Math.min(song.duration - 0.1, Number(e.target.value)))),
+                  `section-start:${s.id}`,
+                )
+              }
+              onBlur={() => edit('Move Section', sortSections, `section-start:${s.id}`)}
             />
             <span className="section-time">{formatTime(s.start)}</span>
             <button
               title="Move section start to playhead"
               disabled={i === 0}
-              onClick={() => {
-                s.start = engine.position
-                sortSections()
-              }}
+              onClick={() =>
+                edit('Move Section', () => {
+                  s.start = engine.position
+                  sortSections()
+                })
+              }
             >
               ⇥
             </button>
             <button
               title="Delete section"
               disabled={song.sections.length === 1}
-              onClick={() => {
-                song.sections.splice(i, 1)
-                song.sections[0].start = 0
-                engine.sectionsChanged()
-                onChange()
-              }}
+              onClick={() =>
+                edit(`Delete Section “${s.name}”`, () => {
+                  song.sections.splice(i, 1)
+                  song.sections[0].start = 0
+                })
+              }
             >
               ✕
             </button>

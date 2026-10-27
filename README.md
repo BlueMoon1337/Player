@@ -59,10 +59,11 @@ Deleting works as in Lumen. Everything can be deleted from its trash button, its
 | A song in the library | Select it and press Delete, or click its trash button. Player asks first, saying which setlists it comes out of and whether it's playing. If it is playing, playback stops. |
 | A setlist | Its trash button, or right-click ▸ Delete Setlist…. A setlist with songs asks first (the songs stay in the library); an empty one goes straight away. |
 
-Everything above, plus adding, moving, renaming and importing, can be undone:
+Everything above can be undone, along with adding, moving, renaming and importing songs and setlists, and every song edit (title, key, tempo, time signature, click offset, sections):
 
 - **⌘Z** (Ctrl+Z) undoes and **⇧⌘Z** (Ctrl+Shift+Z or Ctrl+Y) redoes, up to 200 steps until Player closes.
 - A note at the bottom of the window says what was done or undone, with an **Undo** button after a deletion.
+- Typing into one field (a title, a tempo, a section name) is one step, not one per key.
 - In a text field, ⌘Z undoes the typing instead.
 - A deleted song's files are kept in the library's hidden `.Trash` folder until Player next starts, so undo can bring them back. After that, they go to the system Trash.
 - Player's questions are its own windows: Return answers yes and Escape answers no.
