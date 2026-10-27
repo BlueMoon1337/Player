@@ -1,52 +1,111 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { Engine, EngineState, JumpMode } from '../audio/engine'
 import type { PadPlayer } from '../audio/pad'
-import { type Bus, KEYS, type Song, formatTime, sectionColor, uid } from '../audio/types'
+import { type Bus, KEYS, type Song, busLabel, busOptions, formatTime, sectionColor, uid } from '../audio/types'
 
 export function BusesPanel({ engine, state }: { engine: Engine; state: EngineState }) {
-  const buses: { id: Bus; label: string }[] = [
-    { id: 'main', label: 'Main (L+R)' },
-    { id: 'left', label: 'Left only' },
-    { id: 'right', label: 'Right only' },
-  ]
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
+  const [needsPermission, setNeedsPermission] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    const all = (await navigator.mediaDevices?.enumerateDevices?.()) ?? []
+    const outs = all.filter((d) => d.kind === 'audiooutput' && d.deviceId && d.deviceId !== 'default')
+    setDevices(outs)
+    // Browsers hide device names (and most devices) until media permission is granted.
+    setNeedsPermission(all.every((d) => !d.label))
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+    navigator.mediaDevices?.addEventListener('devicechange', refresh)
+    return () => navigator.mediaDevices?.removeEventListener('devicechange', refresh)
+  }, [refresh])
+
+  const options = busOptions(state.outputCount)
+  const routable = state.channels.filter((c) => c.group === 'stem' || c.id === 'click')
+  const isMonitor = (name: string, group: string) => group === 'click' || /guide|cue/i.test(name)
+  const preset = (monitor: Bus, tracks: Bus) => {
+    for (const c of routable) engine.setChannel(c.id, { bus: isMonitor(c.name, c.group) ? monitor : tracks })
+  }
+
   return (
     <div className="panel">
       <div className="panel-head">
-        <h3>Buses</h3>
+        <h3>Outputs</h3>
+        {engine.canSelectOutput ? (
+          <label>
+            Audio device
+            <select
+              value={state.outputDeviceId}
+              onChange={(e) => {
+                const opt = e.target.selectedOptions[0]
+                setError(null)
+                engine.setOutputDevice(e.target.value, opt?.textContent ?? '').catch((err: Error) => setError(err.message))
+              }}
+            >
+              <option value="">System default</option>
+              {devices.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label || 'Audio device'}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <p>This browser can't choose an output device; it plays through the system default.</p>
+        )}
+        {needsPermission && engine.canSelectOutput && (
+          <button
+            className="small"
+            onClick={async () => {
+              try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+                stream.getTracks().forEach((t) => t.stop())
+              } catch {
+                setError('Device access was not granted')
+              }
+              void refresh()
+            }}
+          >
+            Show all audio devices
+          </button>
+        )}
         <p>
-          Route channels to an output side. Typical in-ear setup: click &amp; guide hard left, tracks right, then
-          split the two sides at the desk.
+          {state.outputCount} output{state.outputCount === 1 ? '' : 's'} on this device.
+          {state.outputCount <= 2 && ' Choose a multi-output audio interface to send click and guide to their own outputs.'}
         </p>
-        <button
-          className="small"
-          onClick={() => {
-            for (const c of state.channels) {
-              const toLeft = c.group === 'click' || c.name.toLowerCase().includes('guide')
-              engine.setChannel(c.id, { bus: toLeft ? 'left' : 'right' })
-            }
-          }}
-        >
-          Click/Guide left · Tracks right
-        </button>
-        <button className="small" onClick={() => state.channels.forEach((c) => engine.setChannel(c.id, { bus: 'main' }))}>
+        {error && <p className="panel-error">{error}</p>}
+        {state.outputCount >= 4 ? (
+          <button className="small" onClick={() => preset('pair:1', 'main')}>
+            Click/Guide → Out 3/4 · Tracks → Main
+          </button>
+        ) : (
+          <button className="small" onClick={() => preset('mono:0', 'mono:1')}>
+            Click/Guide left · Tracks right
+          </button>
+        )}
+        <button className="small" onClick={() => preset('main', 'main')}>
           All to Main
         </button>
       </div>
       <div className="bus-grid">
-        {state.channels
-          .filter((c) => c.id !== 'accent' && c.id !== 'q' && c.id !== 'e' && c.id !== 's')
-          .map((c) => (
+        {routable.map((c) => {
+          const missing = !options.includes(c.settings.bus)
+          return (
             <label key={c.id} className="bus-row">
               <span>{c.name}</span>
               <select value={c.settings.bus} onChange={(e) => engine.setChannel(c.id, { bus: e.target.value as Bus })}>
-                {buses.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.label}
+                {missing && <option value={c.settings.bus}>{busLabel(c.settings.bus)} (not on this device → Main)</option>}
+                {options.map((b) => (
+                  <option key={b} value={b}>
+                    {busLabel(b)}
                   </option>
                 ))}
               </select>
             </label>
-          ))}
+          )
+        })}
       </div>
     </div>
   )
@@ -274,10 +333,21 @@ interface MenuProps {
   setJumpMode: (m: JumpMode) => void
   fadeSeconds: number
   setFadeSeconds: (s: number) => void
+  /** Desktop only: where songs are stored. */
+  libraryRoot?: string | null
+  onRevealLibrary?: () => void
   onClose: () => void
 }
 
-export function Menu({ jumpMode, setJumpMode, fadeSeconds, setFadeSeconds, onClose }: MenuProps) {
+export function Menu({
+  jumpMode,
+  setJumpMode,
+  fadeSeconds,
+  setFadeSeconds,
+  libraryRoot,
+  onRevealLibrary,
+  onClose,
+}: MenuProps) {
   return (
     <div className="menu-backdrop" onClick={onClose}>
       <div className="menu" onClick={(e) => e.stopPropagation()}>
@@ -315,6 +385,19 @@ export function Menu({ jumpMode, setJumpMode, fadeSeconds, setFadeSeconds, onClo
           <dt>F</dt>
           <dd>Fade out</dd>
         </dl>
+        {libraryRoot && (
+          <>
+            <h4>Song library</h4>
+            <p className="hint library-path" title={libraryRoot}>
+              {libraryRoot}
+            </p>
+            {onRevealLibrary && (
+              <button className="small" onClick={onRevealLibrary}>
+                Open library folder
+              </button>
+            )}
+          </>
+        )}
         <p className="hint">Drop audio files anywhere on the window to import them as a new song.</p>
         <button className="small" onClick={onClose}>
           Done

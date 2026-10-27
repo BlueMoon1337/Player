@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { type Engine, type EngineState, faderToDb } from '../audio/engine'
-import type { ChannelSettings } from '../audio/types'
+import { type ChannelSettings, busLabel } from '../audio/types'
 import { Fader } from './Fader'
 
 interface Props {
@@ -70,7 +70,11 @@ export function Mixer({ engine, state, panel, setPanel, link, setLink, padOn }: 
         </div>
         <div className="strip-name" title={c.name}>
           {c.name}
-          {s.bus !== 'main' && <span className="strip-bus">{s.bus === 'left' ? 'L' : 'R'}</span>}
+          {s.bus !== 'main' && (
+            <span className="strip-bus" title={busLabel(s.bus)}>
+              {busLabel(s.bus).replace(/^Out | \(mono\)$/g, '')}
+            </span>
+          )}
         </div>
       </div>
     )

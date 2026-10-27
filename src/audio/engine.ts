@@ -4,6 +4,9 @@ import {
   type ChannelSettings,
   CLICK_CHANNELS,
   type Song,
+  busTopChannel,
+  normalizeBus,
+  parseBus,
   sectionEnd,
 } from './types'
 
@@ -20,6 +23,15 @@ interface Channel {
   panner: StereoPannerNode
   analyser: AnalyserNode
   settings: ChannelSettings
+}
+
+/** Per-route output stage: its own fade, master and limiter, then into the device channels. */
+interface Output {
+  input: GainNode
+  fade: GainNode
+  master: GainNode
+  limiter: DynamicsCompressorNode
+  splitter: ChannelSplitterNode | null
 }
 
 interface Loop {
@@ -40,9 +52,16 @@ export interface EngineState {
   fading: boolean
   channels: { id: string; name: string; group: 'click' | 'stem'; settings: ChannelSettings }[]
   masterVolume: number
+  /** Channels on the current output device (2 for plain stereo). */
+  outputCount: number
+  /** '' means the system default device. */
+  outputDeviceId: string
 }
 
 const MIX_KEY = 'player.mix.v1'
+const OUTPUT_KEY = 'player.output.v1'
+
+type SinkContext = AudioContext & { setSinkId?: (id: string) => Promise<void> }
 
 const DEFAULT_SETTINGS: ChannelSettings = { volume: 0.75, mute: false, solo: false, bus: 'main' }
 
@@ -69,8 +88,10 @@ function loadMix(): Record<string, Partial<ChannelSettings>> {
 
 export class Engine {
   readonly ctx: AudioContext
-  private master: GainNode
-  private fade: GainNode
+  private outputs = new Map<Bus, Output>()
+  private merger!: ChannelMergerNode
+  private outputCount = 0
+  private outputDeviceId = ''
   private clickBus!: Channel
   private channels = new Map<string, Channel>()
   private order: string[] = []
@@ -96,31 +117,139 @@ export class Engine {
   midiMuted = false
   fadeSeconds = 4
 
-  constructor() {
-    this.ctx = new AudioContext({ latencyHint: 'interactive' })
-    const limiter = this.ctx.createDynamicsCompressor()
-    limiter.threshold.value = -1
-    limiter.knee.value = 0
-    limiter.ratio.value = 20
-    limiter.attack.value = 0.002
-    limiter.release.value = 0.1
-    this.master = this.ctx.createGain()
-    this.master.gain.value = faderToGain(this.masterVolume)
-    this.fade = this.ctx.createGain()
-    this.fade.connect(this.master).connect(limiter).connect(this.ctx.destination)
-
+  /** `ctx` is injectable so tests can render the graph offline with any channel count. */
+  constructor(ctx?: AudioContext) {
+    this.ctx = ctx ?? new AudioContext({ latencyHint: 'interactive' })
     const saved = loadMix()
-    if (typeof saved.__master?.volume === 'number') {
-      this.masterVolume = saved.__master.volume
-      this.master.gain.value = faderToGain(this.masterVolume)
-    }
+    if (typeof saved.__master?.volume === 'number') this.masterVolume = saved.__master.volume
+    this.configureOutputs()
     for (const c of CLICK_CHANNELS) {
       const ch = this.createChannel(c.id, c.name, 'click')
       if (c.id === 'click') this.clickBus = ch
     }
     this.state = this.buildState()
     this.tickTimer = window.setInterval(() => this.tick(), 30)
+    this.ctx.addEventListener('sinkchange', () => {
+      this.configureOutputs()
+      this.emit()
+    })
     this.initMidi()
+  }
+
+  // ----------------------------------------------------------------- outputs
+
+  /** Matches the graph to the device: every channel it exposes becomes a routable output. */
+  private configureOutputs() {
+    const dest = this.ctx.destination
+    const n = Math.max(2, Math.min(32, dest.maxChannelCount || 2))
+    if (n === this.outputCount) return
+    this.outputCount = n
+    dest.channelCount = n
+    dest.channelCountMode = 'explicit'
+    dest.channelInterpretation = 'discrete'
+    this.merger?.disconnect()
+    this.merger = this.ctx.createChannelMerger(n)
+    this.merger.connect(dest)
+    for (const [bus, out] of this.outputs) this.connectOutput(bus, out)
+    for (const ch of this.channels.values()) this.route(ch)
+  }
+
+  private connectOutput(bus: Bus, out: Output) {
+    out.limiter.disconnect()
+    out.splitter?.disconnect()
+    out.splitter = null
+    if (busTopChannel(bus) >= this.outputCount) return
+    const { kind, index } = parseBus(bus)
+    if (kind === 'mono') {
+      out.limiter.connect(this.merger, 0, index)
+    } else {
+      out.splitter = this.ctx.createChannelSplitter(2)
+      out.limiter.connect(out.splitter)
+      out.splitter.connect(this.merger, 0, index * 2)
+      out.splitter.connect(this.merger, 1, index * 2 + 1)
+    }
+  }
+
+  private output(bus: Bus): Output {
+    let out = this.outputs.get(bus)
+    if (out) return out
+    const ctx = this.ctx
+    const input = ctx.createGain()
+    if (parseBus(bus).kind === 'mono') {
+      // Fold whatever arrives (mono click, stereo stem) to one channel.
+      input.channelCount = 1
+      input.channelCountMode = 'explicit'
+    }
+    const fade = ctx.createGain()
+    fade.gain.value = this.fading ? 0 : 1
+    const master = ctx.createGain()
+    master.gain.value = faderToGain(this.masterVolume)
+    const limiter = ctx.createDynamicsCompressor()
+    limiter.threshold.value = -1
+    limiter.knee.value = 0
+    limiter.ratio.value = 20
+    limiter.attack.value = 0.002
+    limiter.release.value = 0.1
+    input.connect(fade).connect(master).connect(limiter)
+    out = { input, fade, master, limiter, splitter: null }
+    this.outputs.set(bus, out)
+    this.connectOutput(bus, out)
+    return out
+  }
+
+  /** Falls back to Main when a route needs more outputs than the device has. */
+  private effectiveBus(bus: Bus): Bus {
+    return busTopChannel(bus) < this.outputCount ? bus : 'main'
+  }
+
+  private route(ch: Channel) {
+    ch.gain.disconnect()
+    ch.panner.disconnect()
+    ch.gain.connect(ch.analyser)
+    if (ch.group === 'click' && ch.id !== 'click') {
+      // Click sub-channels always feed the Click bus, which carries the routing.
+      ch.gain.connect(ch.panner).connect(this.clickBus.input)
+      return
+    }
+    const bus = this.effectiveBus(ch.settings.bus)
+    if (parseBus(bus).kind === 'mono') ch.gain.connect(this.output(bus).input)
+    else ch.gain.connect(ch.panner).connect(this.output(bus).input)
+  }
+
+  get canSelectOutput(): boolean {
+    return typeof (this.ctx as SinkContext).setSinkId === 'function'
+  }
+
+  /** Switches the audio device ('' = system default). Routing adapts to its channel count. */
+  async setOutputDevice(deviceId: string, label = '') {
+    const ctx = this.ctx as SinkContext
+    if (!ctx.setSinkId) throw new Error('This runtime cannot choose an audio output device')
+    await ctx.setSinkId(deviceId)
+    this.outputDeviceId = deviceId
+    this.configureOutputs()
+    try {
+      localStorage.setItem(OUTPUT_KEY, JSON.stringify({ deviceId, label }))
+    } catch {
+      /* storage unavailable */
+    }
+    this.emit()
+  }
+
+  /** Reconnects to the last-used device if it's plugged in. */
+  async restoreOutputDevice(available: MediaDeviceInfo[]) {
+    let saved: { deviceId?: string } = {}
+    try {
+      saved = JSON.parse(localStorage.getItem(OUTPUT_KEY) || '{}')
+    } catch {
+      /* ignore */
+    }
+    if (!saved.deviceId || !this.canSelectOutput) return
+    if (!available.some((d) => d.kind === 'audiooutput' && d.deviceId === saved.deviceId)) return
+    try {
+      await this.setOutputDevice(saved.deviceId)
+    } catch {
+      /* device refused; stay on default */
+    }
   }
 
   // ---------------------------------------------------------------- channels
@@ -132,11 +261,7 @@ export class Engine {
     const panner = this.ctx.createStereoPanner()
     const analyser = this.ctx.createAnalyser()
     analyser.fftSize = 512
-    input.connect(gain).connect(panner)
-    gain.connect(analyser)
-    // Click sub-channels feed the Click bus; everything else feeds the fade stage.
-    if (group === 'click' && id !== 'click') panner.connect(this.clickBus.input)
-    else panner.connect(this.fade)
+    input.connect(gain)
     const ch: Channel = {
       id,
       name,
@@ -146,10 +271,11 @@ export class Engine {
       gain,
       panner,
       analyser,
-      settings: { ...DEFAULT_SETTINGS, ...saved, solo: false },
+      settings: { ...DEFAULT_SETTINGS, ...saved, solo: false, bus: normalizeBus(saved.bus ?? 'main') },
     }
     this.channels.set(id, ch)
     this.order.push(id)
+    this.route(ch)
     return ch
   }
 
@@ -161,7 +287,6 @@ export class Engine {
       let g = s.mute ? 0 : faderToGain(s.volume)
       if (ch.group === 'stem' && anySolo && !s.solo) g = 0
       ch.gain.gain.setTargetAtTime(g, now, 0.01)
-      ch.panner.pan.setTargetAtTime(s.bus === 'left' ? -1 : s.bus === 'right' ? 1 : 0, now, 0.01)
     }
   }
 
@@ -182,6 +307,7 @@ export class Engine {
     const ch = this.channels.get(id)
     if (!ch) return
     ch.settings = { ...ch.settings, ...patch }
+    if (patch.bus !== undefined) this.route(ch)
     this.applyGains()
     this.saveMix()
     this.emit()
@@ -189,7 +315,7 @@ export class Engine {
 
   setMasterVolume(v: number) {
     this.masterVolume = v
-    this.master.gain.setTargetAtTime(faderToGain(v), this.ctx.currentTime, 0.01)
+    for (const out of this.outputs.values()) out.master.gain.setTargetAtTime(faderToGain(v), this.ctx.currentTime, 0.01)
     this.saveMix()
     this.emit()
   }
@@ -219,6 +345,7 @@ export class Engine {
     for (const id of [...this.order]) {
       const ch = this.channels.get(id)!
       if (ch.group === 'stem') {
+        ch.gain.disconnect()
         ch.panner.disconnect()
         this.channels.delete(id)
         this.order = this.order.filter((o) => o !== id)
@@ -443,9 +570,11 @@ export class Engine {
     if (!this.playing || this.fading) return
     this.fading = true
     const now = this.ctx.currentTime
-    this.fade.gain.cancelScheduledValues(now)
-    this.fade.gain.setValueAtTime(this.fade.gain.value, now)
-    this.fade.gain.linearRampToValueAtTime(0, now + seconds)
+    for (const { fade } of this.outputs.values()) {
+      fade.gain.cancelScheduledValues(now)
+      fade.gain.setValueAtTime(fade.gain.value, now)
+      fade.gain.linearRampToValueAtTime(0, now + seconds)
+    }
     this.fadeTimer = window.setTimeout(() => {
       this.pause()
     }, seconds * 1000 + 50)
@@ -455,11 +584,11 @@ export class Engine {
   private cancelFade() {
     window.clearTimeout(this.fadeTimer)
     const now = this.ctx.currentTime
-    this.fade.gain.cancelScheduledValues(now)
-    this.fade.gain.setValueAtTime(1, now)
-    if (this.fading) {
-      this.fading = false
+    for (const { fade } of this.outputs.values()) {
+      fade.gain.cancelScheduledValues(now)
+      fade.gain.setValueAtTime(1, now)
     }
+    this.fading = false
   }
 
   onEnded(fn: () => void) {
@@ -524,6 +653,8 @@ export class Engine {
       pendingJump: this.pendingJump,
       fading: this.fading,
       masterVolume: this.masterVolume,
+      outputCount: this.outputCount,
+      outputDeviceId: this.outputDeviceId,
       channels: this.order.map((id) => {
         const c = this.channels.get(id)!
         return { id: c.id, name: c.name, group: c.group, settings: c.settings }

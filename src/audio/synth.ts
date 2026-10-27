@@ -11,17 +11,23 @@ export interface ClickBuffers {
   s: AudioBuffer
 }
 
-function writeClick(data: Float32Array, at: number, sr: number, freq: number, amp: number) {
-  const len = Math.floor(sr * 0.035)
-  const start = Math.round(at * sr)
-  for (let i = 0; i < len; i++) {
-    const idx = start + i
-    if (idx < 0) continue
-    if (idx >= data.length) break
+const CLICK_SAMPLE_RATE = 16000
+
+/** One click sound (a short decaying sine burst), rendered once and stamped in for every beat. */
+function clickTemplate(sr: number, freq: number, amp: number): Float32Array {
+  const out = new Float32Array(Math.floor(sr * 0.035))
+  for (let i = 0; i < out.length; i++) {
     const t = i / sr
-    const env = Math.exp(-t * 140) * Math.min(1, i / 8)
-    data[idx] += amp * env * Math.sin(2 * Math.PI * freq * t)
+    out[i] = amp * Math.exp(-t * 140) * Math.min(1, i / 8) * Math.sin(2 * Math.PI * freq * t)
   }
+  return out
+}
+
+function writeClick(data: Float32Array, at: number, sr: number, tpl: Float32Array) {
+  const start = Math.round(at * sr)
+  const from = Math.max(0, -start)
+  const to = Math.min(tpl.length, data.length - start)
+  for (let i = from; i < to; i++) data[start + i] += tpl[i]
 }
 
 /**
@@ -29,7 +35,10 @@ function writeClick(data: Float32Array, at: number, sr: number, freq: number, am
  * can be started alongside the stems and stay locked to them, including through loops.
  */
 export function renderClick(ctx: BaseAudioContext, song: Song): ClickBuffers {
-  const sr = ctx.sampleRate
+  // Clicks are tones of at most 1.65 kHz, so 16 kHz is plenty. Playback resamples them and
+  // positions loops in fractional frames, so they stay locked to stems at any device rate,
+  // at a third of the memory a full-rate render would take for a long song.
+  const sr = CLICK_SAMPLE_RATE
   const length = Math.max(1, Math.ceil(song.duration * sr))
   const make = () => ctx.createBuffer(1, length, sr)
   const bufs = { accent: make(), q: make(), e: make(), s: make() }
@@ -39,6 +48,10 @@ export function renderClick(ctx: BaseAudioContext, song: Song): ClickBuffers {
   const q = bufs.q.getChannelData(0)
   const e = bufs.e.getChannelData(0)
   const s = bufs.s.getChannelData(0)
+  const accentTpl = clickTemplate(sr, 1650, 0.9)
+  const quarterTpl = clickTemplate(sr, 1050, 0.75)
+  const eighthTpl = clickTemplate(sr, 880, 0.5)
+  const sixteenthTpl = clickTemplate(sr, 720, 0.35)
   // Beats before the click offset are allowed so pickups get a click too.
   let n = -Math.floor(song.clickOffset / beat)
   for (;;) {
@@ -46,11 +59,11 @@ export function renderClick(ctx: BaseAudioContext, song: Song): ClickBuffers {
     if (t >= song.duration) break
     if (t >= 0) {
       const inBar = ((n % beatsPerBar) + beatsPerBar) % beatsPerBar
-      if (inBar === 0) writeClick(a, t, sr, 1650, 0.9)
-      else writeClick(q, t, sr, 1050, 0.75)
-      writeClick(e, t + beat / 2, sr, 880, 0.5)
-      writeClick(s, t + beat / 4, sr, 720, 0.35)
-      writeClick(s, t + (3 * beat) / 4, sr, 720, 0.35)
+      if (inBar === 0) writeClick(a, t, sr, accentTpl)
+      else writeClick(q, t, sr, quarterTpl)
+      writeClick(e, t + beat / 2, sr, eighthTpl)
+      writeClick(s, t + beat / 4, sr, sixteenthTpl)
+      writeClick(s, t + (3 * beat) / 4, sr, sixteenthTpl)
     }
     n++
   }

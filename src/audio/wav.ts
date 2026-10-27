@@ -26,8 +26,11 @@ export interface WavFile {
   /** Human-readable sample encoding, e.g. "24-bit PCM". */
   encoding: string
   meta: WavMeta
-  /** Null when the sample encoding isn't one we decode; let the browser try instead. */
-  decode: ((ctx: BaseAudioContext) => AudioBuffer) | null
+  /**
+   * Decodes to one Float32Array per channel. Needs no AudioContext, so it can run in a worker.
+   * Null when the sample encoding isn't one we decode; let the browser try instead.
+   */
+  decodeChannels: (() => Float32Array[]) | null
 }
 
 export class WavError extends Error {}
@@ -183,19 +186,17 @@ export function readWav(ab: ArrayBuffer): WavFile | null {
   }
 
   const reader = read
-  const decode = reader
-    ? (ctx: BaseAudioContext) => {
+  const decodeChannels = reader
+    ? () => {
         if (frames === 0) throw new WavError('no audio frames')
-        const buffer = ctx.createBuffer(channels, frames, sampleRate)
-        const outs = Array.from({ length: channels }, (_, c) => buffer.getChannelData(c))
-        for (let c = 0; c < channels; c++) {
-          const out = outs[c]
+        return Array.from({ length: channels }, (_, c) => {
+          const out = new Float32Array(frames)
           let o = dataOffset + c * bytesPer
           for (let f = 0; f < frames; f++, o += blockAlign) out[f] = reader(o)
-        }
-        return buffer
+          return out
+        })
       }
     : null
 
-  return { sampleRate, channels, frames, encoding, meta, decode }
+  return { sampleRate, channels, frames, encoding, meta, decodeChannels }
 }

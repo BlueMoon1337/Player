@@ -9,6 +9,8 @@ export interface Stem {
   id: string
   name: string
   buffer: AudioBuffer
+  /** File name inside the song's library folder (desktop). */
+  file?: string
 }
 
 export interface Song {
@@ -22,10 +24,13 @@ export interface Song {
   clickOffset: number
   duration: number
   sections: Section[]
-  /** Audio stems. Empty until the song is loaded (demo songs are rendered lazily). */
+  /** Audio stems. Empty until the song is loaded (demo and library songs load lazily). */
   stems: Stem[]
+  /** Library stem files, kept while `stems` is unloaded so the song can be reloaded from disk. */
+  stemFiles?: { id: string; name: string; file: string }[]
   artwork: string
-  source: 'demo' | 'user'
+  /** demo: synthesized; user: imported in a browser (memory only); library: saved on disk. */
+  source: 'demo' | 'user' | 'library'
 }
 
 export const CLICK_CHANNELS = [
@@ -38,7 +43,45 @@ export const CLICK_CHANNELS = [
 
 export type ClickChannelId = (typeof CLICK_CHANNELS)[number]['id']
 
-export type Bus = 'main' | 'left' | 'right'
+/**
+ * Output routing for a channel: 'main' is outputs 1/2, `pair:N` is outputs 2N+1/2N+2,
+ * and `mono:K` sends a mono sum to output K+1 alone.
+ */
+export type Bus = 'main' | `pair:${number}` | `mono:${number}`
+
+export function parseBus(bus: string): { kind: 'pair' | 'mono'; index: number } {
+  // Older saves used 'left' / 'right' for hard-panned routing on a stereo output.
+  if (bus === 'left') return { kind: 'mono', index: 0 }
+  if (bus === 'right') return { kind: 'mono', index: 1 }
+  const m = /^(pair|mono):(\d+)$/.exec(bus)
+  if (m) return { kind: m[1] as 'pair' | 'mono', index: Number(m[2]) }
+  return { kind: 'pair', index: 0 }
+}
+
+export function normalizeBus(bus: string): Bus {
+  const { kind, index } = parseBus(bus)
+  return kind === 'pair' && index === 0 ? 'main' : `${kind}:${index}`
+}
+
+/** Highest output channel (0-based) a bus writes to. */
+export function busTopChannel(bus: Bus): number {
+  const { kind, index } = parseBus(bus)
+  return kind === 'pair' ? index * 2 + 1 : index
+}
+
+export function busLabel(bus: Bus): string {
+  const { kind, index } = parseBus(bus)
+  if (kind === 'pair') return index === 0 ? 'Main 1/2' : `Out ${index * 2 + 1}/${index * 2 + 2}`
+  return `Out ${index + 1} (mono)`
+}
+
+/** Every routing option a device with `outputs` channels supports, in menu order. */
+export function busOptions(outputs: number): Bus[] {
+  const out: Bus[] = ['main']
+  for (let p = 1; p * 2 + 1 < outputs; p++) out.push(`pair:${p}`)
+  for (let k = 0; k < outputs; k++) out.push(`mono:${k}`)
+  return out
+}
 
 export interface ChannelSettings {
   volume: number

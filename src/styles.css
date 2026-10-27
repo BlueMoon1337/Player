@@ -446,6 +446,9 @@ button.small {
   padding: 5px 10px;
   font-size: 12px;
 }
+.panel .panel-error {
+  color: var(--mute);
+}
 .bus-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
@@ -797,6 +800,10 @@ button.small {
 .shortcuts dd {
   margin: 0;
   color: var(--muted);
+}
+.library-path {
+  word-break: break-all;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
 }
 .hint {
   margin: 0;

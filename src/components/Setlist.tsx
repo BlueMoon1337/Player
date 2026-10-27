@@ -6,12 +6,14 @@ interface Props {
   currentId: string | null
   onSelect: (id: string) => void
   onImport: (files: File[]) => void
+  /** Replaces the browser file picker (desktop uses a native dialog). */
+  onImportClick?: () => void
   onRemove: (id: string) => void
   onMove: (id: string, dir: -1 | 1) => void
   editMode: boolean
 }
 
-export function Setlist({ songs, currentId, onSelect, onImport, onRemove, onMove, editMode }: Props) {
+export function Setlist({ songs, currentId, onSelect, onImport, onImportClick, onRemove, onMove, editMode }: Props) {
   const input = useRef<HTMLInputElement>(null)
   return (
     <div className="setlist">
@@ -42,7 +44,7 @@ export function Setlist({ songs, currentId, onSelect, onImport, onRemove, onMove
           )}
         </div>
       ))}
-      <button className="song-card add" onClick={() => input.current?.click()} title="Import stems as a new song">
+      <button className="song-card add" onClick={() => (onImportClick ? onImportClick() : input.current?.click())} title="Import stems as a new song">
         <span className="add-plus">+</span>
         <span>Import stems</span>
       </button>

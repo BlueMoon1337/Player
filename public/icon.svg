@@ -1,1 +1,26 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#16181d"/><path d="M24 18v28l22-14z" fill="#3fa9f5"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e232d"/>
+      <stop offset="1" stop-color="#0d0f13"/>
+    </linearGradient>
+    <linearGradient id="wave" gradientUnits="userSpaceOnUse" x1="160" y1="0" x2="864" y2="0">
+      <stop offset="0" stop-color="#14b8a6"/>
+      <stop offset="0.5" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#ef4444"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
+  <rect x="64.5" y="64.5" width="895" height="895" rx="199.5" fill="none" stroke="#2a2f3a" stroke-width="3"/>
+  <g fill="url(#wave)">
+    <rect x="160" y="452" width="40" height="120" rx="20"/>
+    <rect x="228" y="392" width="40" height="240" rx="20"/>
+    <rect x="296" y="332" width="40" height="360" rx="20"/>
+    <rect x="364" y="412" width="40" height="200" rx="20"/>
+    <rect x="620" y="372" width="40" height="280" rx="20"/>
+    <rect x="688" y="302" width="40" height="420" rx="20"/>
+    <rect x="756" y="402" width="40" height="220" rx="20"/>
+    <rect x="824" y="462" width="40" height="100" rx="20"/>
+  </g>
+  <path d="M450 340 L450 684 L574 512 Z" fill="#ffffff" stroke="#ffffff" stroke-width="28" stroke-linejoin="round"/>
+</svg>

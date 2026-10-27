@@ -1,11 +1,16 @@
+import { type AudioInput, decodeAudio } from './decoder'
 import { songArtwork } from './synth'
 import { type Section, type Song, type Stem, uid } from './types'
-import { type WavMeta, readWav } from './wav'
+import type { WavMeta } from './wav'
 
 const AUDIO_EXT = /\.(wav|wave|bwf|rf64|mp3|m4a|aac|ogg|oga|flac|aif|aiff|webm|opus)$/i
 
+export function isAudioName(name: string) {
+  return AUDIO_EXT.test(name)
+}
+
 export function isAudioFile(f: File) {
-  return f.type.startsWith('audio/') || AUDIO_EXT.test(f.name)
+  return f.type.startsWith('audio/') || isAudioName(f.name)
 }
 
 function stemName(fileName: string, prefix: string): string {
@@ -23,6 +28,18 @@ function commonPrefix(names: string[]): string {
   return m && /[\s_\-.]$/.test(p) ? p : m ? m[1] : ''
 }
 
+/** One stem to import: its original file name, and where to read it from. */
+export interface StemSource {
+  name: string
+  /** File name in the song's library folder, when the stem lives on disk (desktop). */
+  file?: string
+  input: AudioInput
+}
+
+export function fileSource(f: File): StemSource {
+  return { name: f.name, input: f }
+}
+
 export interface SkippedFile {
   name: string
   reason: string
@@ -31,28 +48,16 @@ export interface SkippedFile {
 export interface ImportResult {
   song: Song
   skipped: SkippedFile[]
+  /** Library files that couldn't be decoded, so the caller can delete them. */
+  skippedFiles: string[]
   /** Notes about what was picked up from file metadata, for the UI to show. */
   notes: string[]
 }
 
 interface Decoded {
-  file: File
+  source: StemSource
   buffer: AudioBuffer
   meta: WavMeta | null
-}
-
-async function decodeFile(ctx: AudioContext, file: File): Promise<Decoded> {
-  const data = await file.arrayBuffer()
-  // WAV files go through our own reader so every PCM/float variant decodes the same in
-  // every browser and embedded markers/tempo survive. Anything else goes to the browser.
-  const wav = readWav(data)
-  if (wav?.decode) return { file, buffer: wav.decode(ctx), meta: wav.meta }
-  try {
-    const buffer = await ctx.decodeAudioData(data)
-    return { file, buffer, meta: wav?.meta ?? null }
-  } catch {
-    throw new Error(wav ? `unsupported WAV encoding (${wav.encoding})` : 'not a format this browser can decode')
-  }
 }
 
 function sectionsFromMarkers(meta: WavMeta, duration: number): Section[] {
@@ -68,38 +73,46 @@ function sectionsFromMarkers(meta: WavMeta, duration: number): Section[] {
   return out
 }
 
-/** Decodes a batch of stem files into a new song with one channel per file. */
+/** Decodes a batch of stems into a new song with one channel per file. */
 export async function importStems(
   ctx: AudioContext,
-  files: File[],
-  onProgress?: (done: number, total: number, name: string) => void,
+  sources: StemSource[],
+  opts: {
+    songId?: string
+    source?: Song['source']
+    onProgress?: (done: number, total: number, name: string) => void
+  } = {},
 ): Promise<ImportResult> {
-  const audio = files.filter(isAudioFile).sort((a, b) => a.name.localeCompare(b.name))
-  const skipped: SkippedFile[] = files.filter((f) => !isAudioFile(f)).map((f) => ({ name: f.name, reason: 'not an audio file' }))
+  const audio = sources.filter((s) => isAudioName(s.name)).sort((a, b) => a.name.localeCompare(b.name))
+  const skipped: SkippedFile[] = sources
+    .filter((s) => !isAudioName(s.name))
+    .map((s) => ({ name: s.name, reason: 'not an audio file' }))
+  const skippedFiles = sources.filter((s) => !isAudioName(s.name) && s.file).map((s) => s.file!)
   if (audio.length === 0) throw new Error('No audio files found')
 
   const decoded: Decoded[] = []
   // One file at a time keeps peak memory down with long multi-channel stems.
-  for (const [i, f] of audio.entries()) {
-    onProgress?.(i, audio.length, f.name)
-    // Yield so the progress text paints before the (synchronous) decode.
-    await new Promise((r) => setTimeout(r, 0))
+  for (const [i, src] of audio.entries()) {
+    opts.onProgress?.(i, audio.length, src.name)
     try {
-      decoded.push(await decodeFile(ctx, f))
+      const { buffer, meta } = await decodeAudio(ctx, src.input)
+      decoded.push({ source: src, buffer, meta })
     } catch (e) {
-      skipped.push({ name: f.name, reason: (e as Error).message })
+      skipped.push({ name: src.name, reason: (e as Error).message })
+      if (src.file) skippedFiles.push(src.file)
     }
   }
   if (decoded.length === 0) {
     throw new Error(skipped.map((s) => `${s.name}: ${s.reason}`).join('; '))
   }
 
-  const names = decoded.map((d) => d.file.name.replace(/\.[^.]+$/, ''))
+  const names = decoded.map((d) => d.source.name.replace(/\.[^.]+$/, ''))
   const prefix = commonPrefix(names)
   const stems: Stem[] = decoded.map((d) => ({
     id: uid('stem'),
-    name: stemName(d.file.name, prefix).slice(0, 12),
+    name: stemName(d.source.name, prefix).slice(0, 12),
     buffer: d.buffer,
+    file: d.source.file,
   }))
   const duration = Math.max(...stems.map((s) => s.buffer.duration))
 
@@ -121,7 +134,7 @@ export async function importStems(
   const title =
     metaTitle || prefix.replace(/[\s_\-.]+$/, '') || (decoded.length === 1 ? names[0] : 'Imported Song')
   const song: Song = {
-    id: uid('song'),
+    id: opts.songId ?? uid('song'),
     title,
     key: 'C',
     bpm: bpm ?? 120,
@@ -133,7 +146,7 @@ export async function importStems(
       : [{ id: uid('sec'), name: 'Song', start: 0 }],
     stems,
     artwork: songArtwork(title),
-    source: 'user',
+    source: opts.source ?? 'user',
   }
-  return { song, skipped, notes }
+  return { song, skipped, skippedFiles, notes }
 }

@@ -1,0 +1,465 @@
+import {
+  BrowserWindow,
+  Menu,
+  type MenuItemConstructorOptions,
+  type Rectangle,
+  app,
+  dialog,
+  ipcMain,
+  net,
+  powerSaveBlocker,
+  protocol,
+  screen,
+  session,
+  shell,
+} from 'electron'
+import fs from 'node:fs'
+import fsp from 'node:fs/promises'
+import path from 'node:path'
+import { Readable } from 'node:stream'
+import { pathToFileURL } from 'node:url'
+import type { MenuCommand, MenuState, SongRecord } from '../src/platform/types'
+import { Library, assertFileName, assertId } from './library'
+
+const DEV_URL = process.env.VITE_DEV_SERVER_URL
+const RENDERER_DIR = path.join(__dirname, '..', 'dist')
+const APP_ORIGIN = 'app://player'
+const AUDIO_EXTENSIONS = ['wav', 'wave', 'bwf', 'rf64', 'aif', 'aiff', 'flac', 'mp3', 'm4a', 'aac', 'ogg', 'oga', 'opus']
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.json': 'application/json',
+  '.wav': 'audio/wav',
+  '.wave': 'audio/wav',
+  '.bwf': 'audio/wav',
+  '.rf64': 'audio/wav',
+  '.aif': 'audio/aiff',
+  '.aiff': 'audio/aiff',
+  '.flac': 'audio/flac',
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.opus': 'audio/ogg',
+}
+
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "worker-src 'self'",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+].join('; ')
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
+])
+
+let win: BrowserWindow | null = null
+let library: Library
+let active = false
+let quitConfirmed = false
+let sleepBlocker: number | null = null
+let menuState: MenuState = { jumpMode: 'bar', setlistOpen: true, editMode: false }
+
+function libraryRoot() {
+  return process.env.PLAYER_LIBRARY_DIR || path.join(app.getPath('documents'), 'Player Library')
+}
+
+// ------------------------------------------------------------------ protocol
+
+/** Serves the built UI (app://player/...) and library stems (app://player/media/<song>/<file>). */
+function registerAppProtocol() {
+  protocol.handle('app', async (req) => {
+    const url = new URL(req.url)
+    if (url.host !== 'player') return new Response('Not found', { status: 404 })
+    const headers: Record<string, string> = {}
+    let file: string
+    const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
+    if (parts[0] === 'media') {
+      try {
+        if (parts.length !== 3) throw new Error('bad path')
+        file = library.stemPath(parts[1], parts[2])
+      } catch {
+        return new Response('Forbidden', { status: 403 })
+      }
+      // The dev renderer runs on the Vite origin, so allow it to read stems.
+      if (DEV_URL) headers['Access-Control-Allow-Origin'] = new URL(DEV_URL).origin
+      return streamFile(file, headers)
+    } else {
+      file = path.resolve(RENDERER_DIR, '.' + path.posix.normalize('/' + parts.join('/')))
+      if (file !== RENDERER_DIR && !file.startsWith(RENDERER_DIR + path.sep)) {
+        return new Response('Forbidden', { status: 403 })
+      }
+      // Single-page app: anything that isn't a file gets index.html.
+      if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(RENDERER_DIR, 'index.html')
+      if (file.endsWith('.html')) headers['Content-Security-Policy'] = CSP
+    }
+    try {
+      const res = await net.fetch(pathToFileURL(file).toString())
+      if (!res.ok) return new Response('Not found', { status: 404 })
+      headers['Content-Type'] = MIME[path.extname(file).toLowerCase()] ?? 'application/octet-stream'
+      return new Response(res.body, { status: 200, headers })
+    } catch {
+      return new Response('Not found', { status: 404 })
+    }
+  })
+}
+
+/**
+ * Streams a (large) stem straight from disk. Big chunks keep main-process overhead low:
+ * this process also drives the window's frames, so per-chunk JS work shows up as UI stutter.
+ */
+async function streamFile(file: string, headers: Record<string, string>) {
+  try {
+    const { size } = await fsp.stat(file)
+    const body = Readable.toWeb(fs.createReadStream(file, { highWaterMark: 4 << 20 })) as ReadableStream
+    headers['Content-Type'] = MIME[path.extname(file).toLowerCase()] ?? 'application/octet-stream'
+    headers['Content-Length'] = String(size)
+    return new Response(body, { status: 200, headers })
+  } catch {
+    return new Response('Not found', { status: 404 })
+  }
+}
+
+// ------------------------------------------------------------------- window
+
+interface WindowState {
+  bounds?: Rectangle
+  maximized?: boolean
+}
+
+const windowStateFile = () => path.join(app.getPath('userData'), 'window-state.json')
+
+function loadWindowState(): WindowState {
+  try {
+    const s: WindowState = JSON.parse(fs.readFileSync(windowStateFile(), 'utf8'))
+    // Ignore saved bounds that are no longer on any screen (e.g. an unplugged monitor).
+    const b = s.bounds
+    const visible =
+      b &&
+      screen.getAllDisplays().some(({ workArea: w }) => b.x < w.x + w.width && b.x + b.width > w.x && b.y < w.y + w.height && b.y + b.height > w.y)
+    return visible ? s : { maximized: s.maximized }
+  } catch {
+    return {}
+  }
+}
+
+function saveWindowState() {
+  if (!win) return
+  const state: WindowState = { bounds: win.getNormalBounds(), maximized: win.isMaximized() }
+  try {
+    fs.writeFileSync(windowStateFile(), JSON.stringify(state))
+  } catch {
+    /* non-fatal */
+  }
+}
+
+function createWindow() {
+  const state = loadWindowState()
+  win = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    ...state.bounds,
+    minWidth: 960,
+    minHeight: 620,
+    backgroundColor: '#0d0f13',
+    title: 'Player',
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      // Keep timers and the playhead running at full rate when the window is hidden.
+      backgroundThrottling: false,
+      spellcheck: false,
+    },
+  })
+  if (state.maximized) win.maximize()
+  win.once('ready-to-show', () => win?.show())
+  void win.loadURL(DEV_URL ?? `${APP_ORIGIN}/index.html`)
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  win.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith(DEV_URL ?? APP_ORIGIN)) e.preventDefault()
+  })
+
+  win.on('close', (e) => {
+    if (active && !quitConfirmed) {
+      const choice = dialog.showMessageBoxSync(win!, {
+        type: 'warning',
+        buttons: ['Keep Playing', 'Quit'],
+        defaultId: 0,
+        cancelId: 0,
+        message: 'Audio is still playing',
+        detail: 'Quitting now will stop playback.',
+      })
+      if (choice !== 1) {
+        e.preventDefault()
+        return
+      }
+      quitConfirmed = true
+    }
+    saveWindowState()
+  })
+  win.on('closed', () => {
+    win = null
+  })
+}
+
+function setActive(on: boolean) {
+  active = on
+  if (on && sleepBlocker === null) sleepBlocker = powerSaveBlocker.start('prevent-display-sleep')
+  if (!on && sleepBlocker !== null) {
+    powerSaveBlocker.stop(sleepBlocker)
+    sleepBlocker = null
+  }
+}
+
+// --------------------------------------------------------------------- menu
+
+function send(cmd: MenuCommand) {
+  win?.webContents.send('menu', cmd)
+}
+
+function buildMenu() {
+  const isMac = process.platform === 'darwin'
+  const sep = { type: 'separator' } as const
+  const settings: MenuItemConstructorOptions = {
+    label: 'Settings…',
+    accelerator: 'CmdOrCtrl+,',
+    click: () => send('settings'),
+  }
+  // Single-key shortcuts (Space, arrows, F, L, 1-9) are handled by the renderer so they
+  // never fire while typing in a text field; the menu just names them.
+  const template: MenuItemConstructorOptions[] = [
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: 'about' },
+              sep,
+              settings,
+              sep,
+              { role: 'services' },
+              sep,
+              { role: 'hide' },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              sep,
+              { role: 'quit' },
+            ] as MenuItemConstructorOptions[],
+          },
+        ]
+      : []),
+    {
+      label: 'File',
+      submenu: [
+        { label: 'Import Stems…', accelerator: 'CmdOrCtrl+I', click: () => send('import') },
+        sep,
+        { label: 'Open Library Folder', click: () => void shell.openPath(library.root) },
+        ...(isMac ? [] : [sep, settings, sep, { role: 'quit' } as MenuItemConstructorOptions]),
+      ],
+    },
+    { role: 'editMenu' },
+    {
+      label: 'Transport',
+      submenu: [
+        { label: 'Play / Pause (Space)', click: () => send('toggle-play') },
+        { label: 'Back / Previous Song (←)', click: () => send('prev') },
+        { label: 'Next Song (→)', click: () => send('next') },
+        { label: 'Fade Out (F)', click: () => send('fade') },
+        { label: 'Loop Current Section (L)', click: () => send('loop') },
+        sep,
+        {
+          label: 'Section Jumps',
+          submenu: (
+            [
+              ['immediate', 'Immediately'],
+              ['bar', 'At the Next Bar'],
+              ['section', 'At the End of the Section'],
+            ] as const
+          ).map(([mode, label]) => ({
+            label,
+            type: 'radio' as const,
+            checked: menuState.jumpMode === mode,
+            click: () => send(`jump:${mode}`),
+          })),
+        },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        {
+          label: 'Setlist',
+          type: 'checkbox',
+          checked: menuState.setlistOpen,
+          accelerator: 'CmdOrCtrl+Shift+L',
+          click: () => send('toggle-setlist'),
+        },
+        {
+          label: 'Edit Mode',
+          type: 'checkbox',
+          checked: menuState.editMode,
+          accelerator: 'CmdOrCtrl+E',
+          click: () => send('toggle-edit'),
+        },
+        { label: 'Outputs…', accelerator: 'CmdOrCtrl+Shift+O', click: () => send('outputs') },
+        { label: 'Pad Player', accelerator: 'CmdOrCtrl+Shift+P', click: () => send('pad') },
+        sep,
+        { role: 'togglefullscreen' },
+        ...(app.isPackaged ? [] : [sep, { role: 'reload' }, { role: 'toggleDevTools' }] as MenuItemConstructorOptions[]),
+      ],
+    },
+    { role: 'windowMenu' },
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
+// ---------------------------------------------------------------------- ipc
+
+/** Only our own UI may call into the main process. */
+function trusted(e: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent) {
+  const url = e.senderFrame?.url ?? ''
+  return url.startsWith(APP_ORIGIN + '/') || (!!DEV_URL && url.startsWith(DEV_URL))
+}
+
+function handle(channel: string, fn: (...args: any[]) => unknown) {
+  ipcMain.handle(channel, (e, ...args) => {
+    if (!trusted(e)) throw new Error('Untrusted sender')
+    return fn(...args)
+  })
+}
+
+function registerIpc() {
+  handle('library:load', () => library.load())
+
+  handle('library:pick', async () => {
+    const opts: Electron.OpenDialogOptions = {
+      title: 'Import Stems',
+      buttonLabel: 'Import',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Audio', extensions: AUDIO_EXTENSIONS },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    }
+    const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    return r.canceled ? [] : r.filePaths
+  })
+
+  handle('library:create', async (paths: unknown) => {
+    if (!Array.isArray(paths) || !paths.every((p) => typeof p === 'string' && path.isAbsolute(p))) {
+      throw new Error('Expected absolute file paths')
+    }
+    // Only audio gets copied into the library; anything else is reported back as skipped.
+    const isAudio = (p: string) => AUDIO_EXTENSIONS.includes(path.extname(p).slice(1).toLowerCase())
+    const created = await library.createSong(paths.filter(isAudio))
+    for (const p of paths.filter((p) => !isAudio(p))) created.failed.push({ name: path.basename(p), reason: 'not an audio file' })
+    return created
+  })
+
+  handle('library:save', (rec: SongRecord) => library.saveSong(rec))
+
+  handle('library:remove-files', (id: unknown, files: unknown) => {
+    assertId(id)
+    if (!Array.isArray(files)) throw new Error('Expected file names')
+    files.forEach(assertFileName)
+    return library.removeFiles(id, files)
+  })
+
+  handle('library:delete', async (id: unknown) => {
+    assertId(id)
+    const dir = library.songDir(id)
+    try {
+      await shell.trashItem(dir)
+    } catch {
+      // No system trash (some Linux setups): park it in the library instead of deleting.
+      const parked = path.join(library.root, '.Deleted', id)
+      await fsp.mkdir(path.dirname(parked), { recursive: true })
+      await fsp.rename(dir, parked)
+    }
+  })
+
+  handle('library:setlist', (ids: string[]) => library.saveSetlist(ids))
+
+  handle('library:reveal', async (id?: unknown) => {
+    if (id === undefined) return void (await shell.openPath(library.root))
+    assertId(id)
+    await shell.openPath(library.songDir(id))
+  })
+
+  ipcMain.on('app:active', (e, on: unknown) => {
+    if (trusted(e)) setActive(on === true)
+  })
+
+  ipcMain.on('app:menu-state', (e, s: Partial<MenuState>) => {
+    if (!trusted(e) || typeof s !== 'object' || !s) return
+    menuState = {
+      jumpMode: s.jumpMode === 'immediate' || s.jumpMode === 'section' ? s.jumpMode : 'bar',
+      setlistOpen: s.setlistOpen !== false,
+      editMode: s.editMode === true,
+    }
+    buildMenu()
+  })
+}
+
+// --------------------------------------------------------------- lifecycle
+
+function setupPermissions() {
+  const ses = session.defaultSession
+  // MIDI (start/stop out), output-device selection, and audio-only device access (to list
+  // interfaces by name). Camera, location, notifications etc. are refused.
+  ses.setPermissionRequestHandler((_wc, permission, cb, details) => {
+    if (permission === 'media') {
+      const types = (details as { mediaTypes?: string[] }).mediaTypes ?? []
+      return cb(!types.includes('video'))
+    }
+    cb(permission === 'midi' || permission === 'speaker-selection')
+  })
+  ses.setPermissionCheckHandler((_wc, permission) =>
+    permission === 'midi' || permission === 'media' || permission === 'speaker-selection',
+  )
+}
+
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!win) return
+    if (win.isMinimized()) win.restore()
+    win.focus()
+  })
+
+  void app.whenReady().then(() => {
+    library = new Library(libraryRoot())
+    registerAppProtocol()
+    setupPermissions()
+    registerIpc()
+    buildMenu()
+    createWindow()
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+  })
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit()
+  })
+}

@@ -1,0 +1,34 @@
+appId: com.bluemoon1337.player
+productName: Player
+copyright: Copyright © 2026 BlueMoon1337
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**
+  - dist-electron/**
+  - "!dist-electron/*.map"
+  - package.json
+asar: true
+
+mac:
+  category: public.app-category.music
+  target:
+    - target: dmg
+      arch: [universal]
+  extendInfo:
+    # Only used if you click "Show all audio devices" to list interfaces by name.
+    NSMicrophoneUsageDescription: Player asks for audio access only to list your audio interfaces by name. It never records.
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+linux:
+  category: Audio
+  syncDesktopName: true
+  target: [AppImage]
