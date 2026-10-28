@@ -43,6 +43,8 @@ export function Fader({ value, onChange, label, meterRef }: Props) {
         className="fader-track"
         ref={track}
         onPointerDown={(e) => {
+          // A right-click opens the strip's menu; it doesn't move the fader.
+          if (e.button !== 0) return
           e.currentTarget.setPointerCapture(e.pointerId)
           fromPointer(e.clientY)
         }}

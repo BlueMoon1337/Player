@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import type { Engine, EngineState, JumpMode } from '../audio/engine'
+import type { Engine, EngineState, JumpMode, LoopMode } from '../audio/engine'
 import { barLength } from '../audio/synth'
 import {
   SECTION_TYPES,
@@ -13,6 +13,7 @@ import {
 } from '../audio/types'
 import { UNDO_KEY, showNote } from '../library/history'
 import { type MenuEntry, type MenuItem, promptDialog, showContextMenu } from './Ask'
+import { LoopForeverIcon, LoopOnceIcon } from './LoopIcons'
 
 interface Props {
   engine: Engine
@@ -138,7 +139,7 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
               const left = (s.start / song.duration) * 100
               const width = ((sectionEnd(song, i) - s.start) / song.duration) * 100
               const px = ((wrap.current?.clientWidth ?? 1000) * width) / 100
-              const looping = state.loop?.sectionId === s.id
+              const looping = state.loop?.sectionId === s.id ? state.loop.mode : null
               const menu = sectionMenu(song, i, engine, edit, looping)
               return (
                 <div
@@ -156,11 +157,11 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
                   </button>
                   <button
                     className={`smap-loop ${looping ? 'on' : ''}`}
-                    title={looping ? 'Stop looping' : `Loop ${s.name}`}
-                    aria-pressed={looping}
-                    onClick={() => engine.toggleLoop(s.id)}
+                    title={loopTitle(s.name, looping)}
+                    aria-pressed={!!looping}
+                    onClick={() => engine.cycleLoop(s.id)}
                   >
-                    <LoopIcon />
+                    {looping === 'forever' ? <LoopForeverIcon /> : <LoopOnceIcon />}
                   </button>
                   {px >= FULL_CONTROLS_PX ? (
                     <>
@@ -194,7 +195,7 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
         {song.sections.map((s, i) => {
           const left = (s.start / song.duration) * 100
           const width = ((sectionEnd(song, i) - s.start) / song.duration) * 100
-          const looping = state.loop?.sectionId === s.id
+          const looping = state.loop?.sectionId === s.id ? state.loop.mode : null
           const pending = state.pendingJump?.sectionId === s.id
           return (
             <div
@@ -211,11 +212,11 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
               </button>
               <button
                 className={`section-loop ${looping ? 'on' : ''}`}
-                onClick={() => engine.toggleLoop(s.id)}
-                title={looping ? 'Stop looping' : `Loop ${s.name}`}
-                aria-pressed={looping}
+                onClick={() => engine.cycleLoop(s.id)}
+                title={loopTitle(s.name, looping)}
+                aria-pressed={!!looping}
               >
-                ⟳
+                {looping === 'forever' ? <LoopForeverIcon /> : <LoopOnceIcon />}
               </button>
             </div>
           )
@@ -315,10 +316,18 @@ function deleteSection(song: Song, i: number, edit: Edit) {
   showNote(`Deleted the section “${name}”. ${UNDO_KEY} undoes this.`, true)
 }
 
-function sectionMenu(song: Song, i: number, engine: Engine, edit: Edit, looping: boolean): MenuEntry[] {
+/** A section's loop button cycles: off → repeat once → repeat until turned off → off. */
+function loopTitle(name: string, mode: LoopMode | null) {
+  if (mode === 'once') return `Repeating ${name} once (click to repeat it until turned off)`
+  if (mode === 'forever') return `Repeating ${name} until turned off (click to stop)`
+  return `Repeat ${name} once (click twice to repeat it until turned off)`
+}
+
+function sectionMenu(song: Song, i: number, engine: Engine, edit: Edit, looping: LoopMode | null): MenuEntry[] {
   const s = song.sections[i]
   return [
-    { label: looping ? 'Stop Looping' : 'Loop', onClick: () => engine.toggleLoop(s.id) },
+    { label: `${looping === 'once' ? '✓ ' : ''}Repeat Once`, onClick: () => engine.toggleLoop(s.id, 'once') },
+    { label: `${looping === 'forever' ? '✓ ' : ''}Repeat Until Turned Off`, onClick: () => engine.toggleLoop(s.id, 'forever') },
     { label: 'Add Section After', submenu: insertMenu(song, i, engine, edit) },
     { label: 'Change To', submenu: typeItems((t) => edit('Rename Section', () => (s.name = nextSectionName(SECTION_TYPES[t], song.sections.filter((x) => x !== s))))) },
     {
@@ -349,4 +358,3 @@ const icon = (d: string) => (
 )
 const PlusIcon = () => icon('M12 6v12M6 12h12')
 const MinusIcon = () => icon('M7 12h10')
-const LoopIcon = () => icon('M7 7h10a4 4 0 0 1 0 8M17 17H7a4 4 0 0 1 0-8')

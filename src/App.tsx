@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { Engine, type JumpMode } from './audio/engine'
+import { Engine, type JumpMode, type LoopMode } from './audio/engine'
 import { type ImportResult, fileSource, importStems, isAudioFile } from './audio/importer'
 import { PadPlayer } from './audio/pad'
 import { computePeaks } from './audio/peaks'
 import { renderDemoStems } from './audio/synth'
 import { type Song, keyRoot, sectionIndexAt } from './audio/types'
 import { AskHost, ContextMenuHost, isAsking } from './components/Ask'
-import { Mixer } from './components/Mixer'
-import { BusesPanel, Menu, PadPanel, SongSettingsDialog } from './components/Panels'
+import { type LowerView, Mixer } from './components/Mixer'
+import { Menu, OutputsDialog, SongSettingsDialog } from './components/Panels'
 import { Setlist } from './components/Setlist'
 import { LibraryPicker } from './components/LibraryPicker'
 import { SetlistsMenu, confirmDeleteSong } from './components/SetlistsMenu'
@@ -95,7 +95,9 @@ export default function App() {
   const [updateOpen, setUpdateOpen] = useState(false)
   const updates = useUpdates()
   const updateReady = updates.status === 'available' && updates.found ? updates.found.version : null
-  const [panel, setPanel] = useState<'buses' | 'pad' | null>(null)
+  /** The lower part: mixer, buses or pad player (Playback's side buttons). */
+  const [lowerView, setLowerView] = useState<LowerView>('mixer')
+  const [outputsOpen, setOutputsOpen] = useState(false)
   const [padOn, setPadOnState] = useState(false)
   const [padKey, setPadKeyState] = useState('C')
   const [padFollow, setPadFollow] = useState(true)
@@ -107,10 +109,7 @@ export default function App() {
   const peaks = useRef(new Map<string, Float32Array>())
   const saveTimers = useRef(new Map<string, number>())
 
-  const setEditing = (on: boolean) => {
-    setEditingState(on)
-    if (on) setPanel(null)
-  }
+  const setEditing = (on: boolean) => setEditingState(on)
 
   useEffect(() => {
     try {
@@ -424,9 +423,10 @@ export default function App() {
     [importPaths],
   )
 
-  const toggleCurrentLoop = () => {
+  /** L: repeat the section under the playhead until turned off; ⇧L: repeat it once. */
+  const toggleCurrentLoop = (mode: LoopMode = 'forever') => {
     const cur = engine.currentSong
-    if (cur) engine.toggleLoop(cur.sections[sectionIndexAt(cur, engine.position)].id)
+    if (cur?.sections.length) engine.toggleLoop(cur.sections[sectionIndexAt(cur, engine.position)].id, mode)
   }
 
   /** ⌘Z: in a text field it undoes the typing; anywhere else, the last library change. */
@@ -458,7 +458,7 @@ export default function App() {
       } else if (e.key === 'ArrowLeft') onPrev()
       else if (e.key === 'ArrowRight') step(1)
       else if (e.key.toLowerCase() === 'f') engine.toggleFade()
-      else if (e.key.toLowerCase() === 'l') toggleCurrentLoop()
+      else if (e.key.toLowerCase() === 'l') toggleCurrentLoop(e.shiftKey ? 'once' : 'forever')
       else if (/^[1-9]$/.test(e.key) && cur) {
         const sec = cur.sections[Number(e.key) - 1]
         if (sec) engine.jumpToSection(sec.id, jumpMode)
@@ -487,10 +487,9 @@ export default function App() {
     else if (cmd === 'song-settings') {
       if (currentId) setSettingsFor(currentId)
     }
-    else if (cmd === 'outputs' || cmd === 'pad') {
-      setEditingState(false)
-      setPanel(cmd === 'outputs' ? 'buses' : 'pad')
-    } else if (cmd === 'settings') setMenuOpen(true)
+    else if (cmd === 'outputs') setOutputsOpen(true)
+    else if (cmd === 'pad') setLowerView('pad')
+    else if (cmd === 'settings') setMenuOpen(true)
     else if (cmd === 'check-updates') {
       setMenuOpen(false)
       setUpdateOpen(true)
@@ -607,34 +606,30 @@ export default function App() {
         edit={song ? (label, change) => editSong(song, label, change) : undefined}
       />
       <div className="lower">
-        {!editing && panel === 'buses' && <BusesPanel engine={engine} state={state} />}
-        {!editing && panel === 'pad' && (
-          <PadPanel
-            pad={pad}
-            padOn={padOn}
-            setPadOn={setPadOn}
-            followSong={padFollow}
-            setFollowSong={(v) => {
-              setPadFollow(v)
-              if (v && song) setPadKey(keyRoot(song.key))
-            }}
-            padKey={padKey}
-            setPadKey={setPadKey}
-          />
-        )}
         <Mixer
           engine={engine}
           state={state}
-          panel={panel}
-          setPanel={(p) => {
-            setPanel(p)
-            if (p) setEditingState(false)
-          }}
-          link={link}
-          setLink={setLink}
+          song={song}
+          view={lowerView}
+          setView={setLowerView}
+          pad={pad}
           padOn={padOn}
+          setPadOn={setPadOn}
+          padKey={padKey}
+          playPadKey={(k) => {
+            setPadFollow(false)
+            setPadKey(k)
+            if (!padOn) setPadOn(true)
+          }}
+          padFollow={padFollow}
+          setPadFollow={(v) => {
+            setPadFollow(v)
+            if (v && song) setPadKey(keyRoot(song.key))
+          }}
+          onOutputs={() => setOutputsOpen(true)}
         />
       </div>
+      {outputsOpen && <OutputsDialog engine={engine} state={state} onClose={() => setOutputsOpen(false)} />}
       {setlistsOpen && (
         <SetlistsMenu
           currentSongId={currentId}
@@ -671,6 +666,12 @@ export default function App() {
       )}
       {menuOpen && (
         <Menu
+          link={link}
+          setLink={setLink}
+          onOutputs={() => {
+            setMenuOpen(false)
+            setOutputsOpen(true)
+          }}
           jumpMode={jumpMode}
           setJumpMode={setJumpMode}
           fadeSeconds={fadeSeconds}

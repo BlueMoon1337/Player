@@ -7,7 +7,7 @@ A multitrack backing-track player for live worship and band use, in the spirit o
 ## Desktop features
 
 - **Song library on disk.** Imported stems are copied into `Documents/Player Library`. Each song gets its own folder holding its stems and a `song.json` with its settings and sections. Setlists are saved in `library.json`. Edits save automatically, and stems load from disk when you select a song. A deleted song is kept until the next launch so it can be undone (see [Deleting and Undo](#deleting-and-undo)).
-- **Audio interface support.** In **Buses → Outputs**, choose the audio device. Every output the device exposes becomes routable: send any channel to Main 1/2, to another pair (Out 3/4, 5/6, …), or to a single output in mono. A typical setup sends click and guide to Out 3/4 for in-ears and tracks to Main for front-of-house, and there's a one-click preset for it. The chosen device is remembered and reconnected the next time it's plugged in.
+- **Audio interface support.** In **Outputs**, choose the audio device. Every output the device exposes becomes routable: send any channel to Main 1/2, to another pair (Out 3/4, 5/6, …), or to a single output in mono. A typical setup sends click and guide to Out 3/4 for in-ears and tracks to Main for front-of-house, and there's a one-click preset for it. The chosen device is remembered and reconnected the next time it's plugged in.
 - **Built for live use.**
   - The display stays awake while audio is playing.
   - Quitting while audio plays asks for confirmation first.
@@ -49,11 +49,18 @@ A multitrack backing-track player for live worship and band use, in the spirit o
   - **Setlists:** **+** makes one, and clicking one makes it current. Double-click a setlist to rename it, or right-click it to rename, duplicate or delete it.
   - **In a setlist:** drag songs to reorder them, and double-click a song to load it.
   - **Importing** adds the new song to the library and to the end of the current setlist.
-- **Mixer.** Faders with meters, mute and solo for each channel, and a master fader with a limiter. Levels are saved between sessions.
+- **Mixer (the lower part, as in Playback).** Each strip has **S** (solo) at the top, a meter beside the fader, and its name at the bottom: click the name to mute it (it greys out). The **›** beside the Click strip shows its parts (Accent, 1/4, 1/8, 1/16, or the song's Click Track). Right-click a strip to reset it or choose its output. The Master strip has left and right meters and a limiter. Levels are saved between sessions.
 - **Side buttons.**
-  - **Pad Player** is an ambient pad that keeps playing between songs and can follow the song's key.
-  - **Mute MIDI** silences the MIDI messages the app sends (start, stop, continue, and a program change on each song change).
-  - **Link** makes AutoLink the default for every song whose card still says Cue Next Song.
+  - The **mixer** button shows the channel strips.
+  - **Buses** groups the stems by name ("EG 1" and "EG 2" go under **EG**), with a fader, mute and solo for each bus. The **›** beside a bus shows its tracks. Right-click a bus to send all its tracks to one output.
+  - **Pad Player** shows the pad: its fader, a choice of three pad sounds, **LINK** (follow the loaded song's key), and the twelve keys. Click a key to play the pad in it; click the lit key to stop.
+  - **Mute MIDI** silences the MIDI messages the app sends (start, stop, continue, and a program change on each song change). It turns red while on.
+  - **Repeat once** (the partial loop) plays the section under the playhead one more time, then carries on.
+  - **Repeat until turned off** (∞) loops that section until you turn it off.
+
+  Each section on the timeline has the same loop button: click it once to repeat the section once, twice to repeat it until turned off, and a third time to stop. The keyboard does the same with **⇧L** and **L**.
+- **Outputs** (View ▸ Outputs…, Settings, or a strip's right-click menu) chooses the audio device and each channel's output.
+- **AutoLink every song** (Settings) makes AutoLink the default for every song whose card still says Cue Next Song.
 - **Importing songs.** Use **Import songs**, **File ▸ Import Songs…** (⌘/Ctrl+I) or **Import Folder…** (⇧⌘/Ctrl+Shift+I), or drop files on the window. You can import several at once:
   - **MultiTracks.com zips** (e.g. `Goodness of God-Victory-Ab-63.00bpm.zip`), and the folders they unzip to. Each becomes a song:
     - Title, album, key and BPM come from the name. Add the artist in Song Settings.
@@ -99,7 +106,8 @@ The web version keeps imported songs in memory only, and can import zips and aud
 | Space | Play / pause |
 | ← / → | Previous (or back to start) / next song |
 | 1–9 | Jump to section |
-| L | Loop current section |
+| L | Repeat the current section until turned off |
+| ⇧L | Repeat the current section once |
 | F | Fade in (from a stop) / out |
 | ⌘Z / ⇧⌘Z | Undo / redo (Ctrl+Z / Ctrl+Y) |
 | ⌘L | Setlists & library (desktop) |

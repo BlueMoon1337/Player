@@ -4,6 +4,7 @@ import {
   type ChannelSettings,
   CLICK_CHANNELS,
   type Song,
+  busGroupName,
   busTopChannel,
   normalizeBus,
   parseBus,
@@ -25,7 +26,19 @@ interface Channel {
   settings: ChannelSettings
   /** One of the loaded song's stems (removed when another song loads). */
   fromSong: boolean
+  /** The bus it's grouped under in the Buses view (stems only): "EG 1" → "EG". */
+  busGroup: string | null
 }
+
+/** A bus in the Buses view: a fader, mute and solo over a group of stems. */
+export interface GroupSettings {
+  volume: number
+  mute: boolean
+  solo: boolean
+}
+
+/** Repeat a section once and carry on, or until the loop is turned off. */
+export type LoopMode = 'once' | 'forever'
 
 /** Per-route output stage: its own fade, master and limiter, then into the device channels. */
 interface Output {
@@ -40,6 +53,7 @@ interface Loop {
   sectionId: string
   start: number
   end: number
+  mode: LoopMode
 }
 
 interface PendingJump {
@@ -53,7 +67,9 @@ export interface EngineState {
   pendingJump: PendingJump | null
   /** A fade in progress: in (from Fade while stopped) or out (Fade while playing). */
   fade: 'in' | 'out' | null
-  channels: { id: string; name: string; group: 'click' | 'stem'; settings: ChannelSettings }[]
+  channels: { id: string; name: string; group: 'click' | 'stem'; busGroup: string | null; settings: ChannelSettings }[]
+  /** The loaded song's buses (stems grouped by name), in mixer order. */
+  groups: { name: string; settings: GroupSettings; members: string[] }[]
   masterVolume: number
   /** Channels on the current output device (2 for plain stereo). */
   outputCount: number
@@ -69,6 +85,7 @@ const OUTPUT_KEY = 'player.output.v1'
 type SinkContext = AudioContext & { setSinkId?: (id: string) => Promise<void> }
 
 const DEFAULT_SETTINGS: ChannelSettings = { volume: 0.75, mute: false, solo: false, bus: 'main' }
+const GROUP_PREFIX = 'bus:'
 
 /** Fader position (0..1) to linear gain. 0.75 is unity, 1.0 is about +6 dB. */
 export function faderToGain(p: number): number {
@@ -81,6 +98,14 @@ export function faderToDb(p: number): string {
   if (g <= 0.0001) return '-∞'
   const db = 20 * Math.log10(g)
   return (db > 0 ? '+' : '') + db.toFixed(1)
+}
+
+function peakOf(a: AnalyserNode): number {
+  const data = new Float32Array(a.fftSize)
+  a.getFloatTimeDomainData(data)
+  let peak = 0
+  for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i]))
+  return peak
 }
 
 function loadMix(): Record<string, Partial<ChannelSettings>> {
@@ -99,7 +124,9 @@ export class Engine {
   private outputDeviceId = ''
   private clickBus!: Channel
   private channels = new Map<string, Channel>()
+  private groups = new Map<string, GroupSettings>()
   private order: string[] = []
+  private masterMeters: [AnalyserNode, AnalyserNode] | null = null
   private sources: AudioBufferSourceNode[] = []
   private sourceChannel = new WeakMap<AudioBufferSourceNode, Channel>()
   private song: Song | null = null
@@ -160,6 +187,14 @@ export class Engine {
     this.merger?.disconnect()
     this.merger = this.ctx.createChannelMerger(n)
     this.merger.connect(dest)
+    // Main 1/2 metered on the Master strip.
+    const split = this.ctx.createChannelSplitter(n)
+    this.merger.connect(split)
+    this.masterMeters = [this.ctx.createAnalyser(), this.ctx.createAnalyser()]
+    this.masterMeters.forEach((a, i) => {
+      a.fftSize = 512
+      split.connect(a, i)
+    })
     for (const [bus, out] of this.outputs) this.connectOutput(bus, out)
     for (const ch of this.channels.values()) this.route(ch)
   }
@@ -283,6 +318,11 @@ export class Engine {
       analyser,
       settings: { ...DEFAULT_SETTINGS, ...saved, solo: false, bus: normalizeBus(saved.bus ?? 'main') },
       fromSong,
+      busGroup: group === 'stem' ? busGroupName(name) : null,
+    }
+    if (ch.busGroup && !this.groups.has(ch.busGroup)) {
+      const g = loadMix()[GROUP_PREFIX + ch.busGroup] ?? {}
+      this.groups.set(ch.busGroup, { volume: g.volume ?? 0.75, mute: g.mute ?? false, solo: false })
     }
     this.channels.set(id, ch)
     this.order.push(id)
@@ -290,14 +330,25 @@ export class Engine {
     return ch
   }
 
+  /**
+   * Solo works in two places: stems and buses (soloing the Click bus leaves just the click), and
+   * the click's own parts among themselves. A stem solo never silences the click.
+   */
   private applyGains() {
-    const anySolo = [...this.channels.values()].some((c) => c.group === 'stem' && c.settings.solo)
+    const all = [...this.channels.values()]
+    const grp = (c: Channel) => (c.busGroup ? this.groups.get(c.busGroup) : undefined)
+    const stemSolo = all.some((c) => c.group === 'stem' && (c.settings.solo || grp(c)?.solo))
+    const clickSolo = this.channels.get('click')?.settings.solo ?? false
+    const partSolo = all.some((c) => c.group === 'click' && c.id !== 'click' && c.settings.solo)
     const now = this.ctx.currentTime
-    for (const ch of this.channels.values()) {
+    for (const ch of all) {
       const s = ch.settings
-      let g = s.mute ? 0 : faderToGain(s.volume)
-      if (ch.group === 'stem' && anySolo && !s.solo) g = 0
-      ch.gain.gain.setTargetAtTime(g, now, 0.01)
+      const g = grp(ch)
+      let on = !s.mute && !g?.mute
+      if (ch.group === 'stem') on &&= stemSolo ? s.solo || !!g?.solo : !clickSolo
+      else if (ch.id !== 'click') on &&= !partSolo || s.solo
+      const gain = on ? faderToGain(s.volume) * (g ? faderToGain(g.volume) : 1) : 0
+      ch.gain.gain.setTargetAtTime(gain, now, 0.01)
     }
   }
 
@@ -306,6 +357,7 @@ export class Engine {
     for (const ch of this.channels.values()) {
       out[ch.id] = { volume: ch.settings.volume, mute: ch.settings.mute, bus: ch.settings.bus }
     }
+    for (const [name, g] of this.groups) out[GROUP_PREFIX + name] = { volume: g.volume, mute: g.mute }
     out.__master = { volume: this.masterVolume }
     try {
       localStorage.setItem(MIX_KEY, JSON.stringify(out))
@@ -324,6 +376,16 @@ export class Engine {
     this.emit()
   }
 
+  /** A bus in the Buses view: its fader, mute and solo apply on top of its stems' own. */
+  setGroup(name: string, patch: Partial<GroupSettings>) {
+    const g = this.groups.get(name)
+    if (!g) return
+    this.groups.set(name, { ...g, ...patch })
+    this.applyGains()
+    this.saveMix()
+    this.emit()
+  }
+
   setMasterVolume(v: number) {
     this.masterVolume = v
     for (const out of this.outputs.values()) out.master.gain.setTargetAtTime(faderToGain(v), this.ctx.currentTime, 0.01)
@@ -335,11 +397,21 @@ export class Engine {
   meter(id: string): number {
     const ch = this.channels.get(id)
     if (!ch || !this.playing) return 0
-    const data = new Float32Array(ch.analyser.fftSize)
-    ch.analyser.getFloatTimeDomainData(data)
+    return peakOf(ch.analyser)
+  }
+
+  /** A bus's level: the loudest of its stems. */
+  groupMeter(name: string): number {
+    if (!this.playing) return 0
     let peak = 0
-    for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i]))
+    for (const ch of this.channels.values()) if (ch.busGroup === name) peak = Math.max(peak, peakOf(ch.analyser))
     return peak
+  }
+
+  /** Left and right of Main 1/2, after the master fader and limiter. */
+  masterMeter(): [number, number] {
+    if (!this.masterMeters || !this.playing) return [0, 0]
+    return [peakOf(this.masterMeters[0]), peakOf(this.masterMeters[1])]
   }
 
   // -------------------------------------------------------------------- song
@@ -491,7 +563,7 @@ export class Engine {
     if (!this.song || !this.loop) return
     const idx = this.song.sections.findIndex((s) => s.id === this.loop!.sectionId)
     if (idx < 0) this.setLoop(null)
-    else this.setLoop(this.loop.sectionId)
+    else this.setLoop(this.loop.sectionId, this.loop.mode)
   }
 
   get currentSong() {
@@ -653,7 +725,7 @@ export class Engine {
     this.prevBase = null
   }
 
-  setLoop(sectionId: string | null) {
+  setLoop(sectionId: string | null, mode: LoopMode = 'forever') {
     const song = this.song
     if (!song) return
     this.rebase()
@@ -665,7 +737,7 @@ export class Engine {
       if (idx < 0) return
       const start = song.sections[idx].start
       const end = sectionEnd(song, idx)
-      this.loop = { sectionId, start, end }
+      this.loop = { sectionId, start, end, mode }
       const pos = this.position
       for (const s of this.sources) {
         if (pos < end) {
@@ -680,8 +752,18 @@ export class Engine {
     this.emit()
   }
 
-  toggleLoop(sectionId: string) {
-    this.setLoop(this.loop?.sectionId === sectionId ? null : sectionId)
+  /** Turns this kind of loop on for the section, or off if it's already on. */
+  toggleLoop(sectionId: string, mode: LoopMode = 'forever') {
+    const l = this.loop
+    this.setLoop(l?.sectionId === sectionId && l.mode === mode ? null : sectionId, mode)
+  }
+
+  /** A section's loop button: off → repeat once → repeat until turned off → off. */
+  cycleLoop(sectionId: string) {
+    const l = this.loop?.sectionId === sectionId ? this.loop : null
+    if (!l) this.setLoop(sectionId, 'once')
+    else if (l.mode === 'once') this.setLoop(sectionId, 'forever')
+    else this.setLoop(null)
   }
 
   /** Ramps every output's fade stage from where it is now to `to` over `seconds`. */
@@ -761,6 +843,21 @@ export class Engine {
       this.lastTickPos = null
       this.emit()
     }
+    // Repeat once: as soon as the loop has gone round, let playback carry on past its end.
+    const l = this.loop
+    if (l?.mode === 'once' && !this.pendingJump && this.startOffset < l.end) {
+      const raw = this.startOffset + (this.ctx.currentTime - this.startCtxTime)
+      if (raw >= l.end + 0.02) {
+        const pos = this.position
+        for (const s of this.sources) s.loop = false
+        this.loop = null
+        this.startOffset = pos
+        this.startCtxTime = this.ctx.currentTime
+        this.prevBase = null
+        this.lastTickPos = null
+        this.emit()
+      }
+    }
     // The hand-off point fires when playback runs across it, not when a seek or jump lands past it.
     const pos = this.position
     const last = this.lastTickPos
@@ -811,6 +908,18 @@ export class Engine {
 
   // ------------------------------------------------------------ subscription
 
+  private groupList(): EngineState['groups'] {
+    const out: EngineState['groups'] = []
+    for (const id of this.order) {
+      const c = this.channels.get(id)!
+      if (!c.busGroup) continue
+      let g = out.find((x) => x.name === c.busGroup)
+      if (!g) out.push((g = { name: c.busGroup, settings: this.groups.get(c.busGroup)!, members: [] }))
+      g.members.push(c.id)
+    }
+    return out
+  }
+
   private buildState(): EngineState {
     return {
       playing: this.playing,
@@ -823,8 +932,9 @@ export class Engine {
       audioClick: this.audioClick,
       channels: this.order.map((id) => {
         const c = this.channels.get(id)!
-        return { id: c.id, name: c.name, group: c.group, settings: c.settings }
+        return { id: c.id, name: c.name, group: c.group, busGroup: c.busGroup, settings: c.settings }
       }),
+      groups: this.groupList(),
     }
   }
 

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Engine, EngineState, JumpMode } from '../audio/engine'
-import type { PadPlayer } from '../audio/pad'
 import { type Bus, KEYS, type Song, busLabel, busOptions, formatTime, sectionColor, uid } from '../audio/types'
 
-export function BusesPanel({ engine, state }: { engine: Engine; state: EngineState }) {
+/** Outputs: the audio device, and which output each click / stem channel goes to. */
+export function OutputsDialog({ engine, state, onClose }: { engine: Engine; state: EngineState; onClose: () => void }) {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [needsPermission, setNeedsPermission] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -29,141 +29,100 @@ export function BusesPanel({ engine, state }: { engine: Engine; state: EngineSta
     for (const c of routable) engine.setChannel(c.id, { bus: isMonitor(c.name, c.group) ? monitor : tracks })
   }
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      onClose()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [onClose])
+
   return (
-    <div className="panel">
-      <div className="panel-head">
-        <h3>Outputs</h3>
-        {engine.canSelectOutput ? (
-          <label>
-            Audio device
-            <select
-              value={state.outputDeviceId}
-              onChange={(e) => {
-                const opt = e.target.selectedOptions[0]
-                setError(null)
-                engine.setOutputDevice(e.target.value, opt?.textContent ?? '').catch((err: Error) => setError(err.message))
-              }}
-            >
-              <option value="">System default</option>
-              {devices.map((d) => (
-                <option key={d.deviceId} value={d.deviceId}>
-                  {d.label || 'Audio device'}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <p>This browser can't choose an output device; it plays through the system default.</p>
-        )}
-        {needsPermission && engine.canSelectOutput && (
-          <button
-            className="small"
-            onClick={async () => {
-              try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-                stream.getTracks().forEach((t) => t.stop())
-              } catch {
-                setError('Device access was not granted')
-              }
-              void refresh()
-            }}
-          >
-            Show all audio devices
-          </button>
-        )}
-        <p>
-          {state.outputCount} output{state.outputCount === 1 ? '' : 's'} on this device.
-          {state.outputCount <= 2 && ' Choose a multi-output audio interface to send click and guide to their own outputs.'}
-        </p>
-        {error && <p className="panel-error">{error}</p>}
-        {state.outputCount >= 4 ? (
-          <button className="small" onClick={() => preset('pair:1', 'main')}>
-            Click/Guide → Out 3/4 · Tracks → Main
-          </button>
-        ) : (
-          <button className="small" onClick={() => preset('mono:0', 'mono:1')}>
-            Click/Guide left · Tracks right
-          </button>
-        )}
-        <button className="small" onClick={() => preset('main', 'main')}>
-          All to Main
-        </button>
-      </div>
-      <div className="bus-grid">
-        {routable.map((c) => {
-          const missing = !options.includes(c.settings.bus)
-          return (
-            <label key={c.id} className="bus-row">
-              <span>{c.name}</span>
-              <select value={c.settings.bus} onChange={(e) => engine.setChannel(c.id, { bus: e.target.value as Bus })}>
-                {missing && <option value={c.settings.bus}>{busLabel(c.settings.bus)} (not on this device → Main)</option>}
-                {options.map((b) => (
-                  <option key={b} value={b}>
-                    {busLabel(b)}
+    <div className="menu-backdrop center" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog outputs panel" role="dialog" aria-label="Outputs">
+        <div className="panel-head">
+          <h3>Outputs</h3>
+          {engine.canSelectOutput ? (
+            <label>
+              Audio device
+              <select
+                value={state.outputDeviceId}
+                onChange={(e) => {
+                  const opt = e.target.selectedOptions[0]
+                  setError(null)
+                  engine.setOutputDevice(e.target.value, opt?.textContent ?? '').catch((err: Error) => setError(err.message))
+                }}
+              >
+                <option value="">System default</option>
+                {devices.map((d) => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.label || 'Audio device'}
                   </option>
                 ))}
               </select>
             </label>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-interface PadProps {
-  pad: PadPlayer
-  padOn: boolean
-  setPadOn: (on: boolean) => void
-  followSong: boolean
-  setFollowSong: (v: boolean) => void
-  padKey: string
-  setPadKey: (k: string) => void
-}
-
-export function PadPanel({ pad, padOn, setPadOn, followSong, setFollowSong, padKey, setPadKey }: PadProps) {
-  const [vol, setVol] = useState(pad.volume)
-  return (
-    <div className="panel">
-      <div className="panel-head">
-        <h3>Pad Player</h3>
-        <p>Ambient pad that keeps playing between songs. Pick a key or let it follow the selected song.</p>
-        <button className={`small ${padOn ? 'on' : ''}`} onClick={() => setPadOn(!padOn)}>
-          {padOn ? 'Pad on' : 'Pad off'}
-        </button>
-        <label className="check">
-          <input type="checkbox" checked={followSong} onChange={(e) => setFollowSong(e.target.checked)} /> Follow song key
-        </label>
-        <label className="range">
-          Level
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={vol}
-            onChange={(e) => {
-              const v = Number(e.target.value)
-              setVol(v)
-              pad.setVolume(v)
-            }}
-          />
-        </label>
-      </div>
-      <div className="key-grid">
-        {KEYS.map((k) => (
-          <button
-            key={k}
-            className={k === padKey ? 'on' : ''}
-            onClick={() => {
-              setFollowSong(false)
-              setPadKey(k)
-              if (!padOn) setPadOn(true)
-            }}
-          >
-            {k}
+          ) : (
+            <p>This browser can't choose an output device; it plays through the system default.</p>
+          )}
+          {needsPermission && engine.canSelectOutput && (
+            <button
+              className="small"
+              onClick={async () => {
+                try {
+                  const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+                  stream.getTracks().forEach((t) => t.stop())
+                } catch {
+                  setError('Device access was not granted')
+                }
+                void refresh()
+              }}
+            >
+              Show all audio devices
+            </button>
+          )}
+          <p>
+            {state.outputCount} output{state.outputCount === 1 ? '' : 's'} on this device.
+            {state.outputCount <= 2 && ' Choose a multi-output audio interface to send click and guide to their own outputs.'}
+          </p>
+          {error && <p className="panel-error">{error}</p>}
+          {state.outputCount >= 4 ? (
+            <button className="small" onClick={() => preset('pair:1', 'main')}>
+              Click/Guide → Out 3/4 · Tracks → Main
+            </button>
+          ) : (
+            <button className="small" onClick={() => preset('mono:0', 'mono:1')}>
+              Click/Guide left · Tracks right
+            </button>
+          )}
+          <button className="small" onClick={() => preset('main', 'main')}>
+            All to Main
           </button>
-        ))}
+        </div>
+        <div className="bus-grid">
+          {routable.map((c) => {
+            const missing = !options.includes(c.settings.bus)
+            return (
+              <label key={c.id} className="bus-row">
+                <span>{c.name}</span>
+                <select value={c.settings.bus} onChange={(e) => engine.setChannel(c.id, { bus: e.target.value as Bus })}>
+                  {missing && <option value={c.settings.bus}>{busLabel(c.settings.bus)} (not on this device → Main)</option>}
+                  {options.map((b) => (
+                    <option key={b} value={b}>
+                      {busLabel(b)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )
+          })}
+        </div>
+        <div className="dialog-actions">
+          <button className="small primary" onClick={onClose}>
+            Done
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -440,6 +399,10 @@ export function SongSettingsDialog({
 }
 
 interface MenuProps {
+  /** AutoLink after every song whose card says Cue Next Song. */
+  link: boolean
+  setLink: (v: boolean) => void
+  onOutputs: () => void
   jumpMode: JumpMode
   setJumpMode: (m: JumpMode) => void
   fadeSeconds: number
@@ -453,6 +416,9 @@ interface MenuProps {
 }
 
 export function Menu({
+  link,
+  setLink,
+  onOutputs,
   jumpMode,
   setJumpMode,
   fadeSeconds,
@@ -500,6 +466,13 @@ export function Menu({
             ))}
           </select>
         </label>
+        <label className="check">
+          <input type="checkbox" checked={link} onChange={(e) => setLink(e.target.checked)} /> AutoLink every song
+        </label>
+        <p className="hint">Songs whose end is set to Cue Next Song start the next song straight away instead.</p>
+        <button className="small" onClick={onOutputs}>
+          Outputs…
+        </button>
         <h4>Keyboard</h4>
         <dl className="shortcuts">
           <dt>Space</dt>
@@ -511,7 +484,9 @@ export function Menu({
           <dt>1–9</dt>
           <dd>Jump to section</dd>
           <dt>L</dt>
-          <dd>Loop current section</dd>
+          <dd>Repeat the current section until turned off</dd>
+          <dt>⇧L</dt>
+          <dd>Repeat the current section once</dd>
           <dt>F</dt>
           <dd>Fade out</dd>
         </dl>

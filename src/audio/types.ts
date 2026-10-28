@@ -99,6 +99,15 @@ export interface ChannelSettings {
   bus: Bus
 }
 
+/** The bus a stem is grouped under in the Buses view: "EG 1" and "EG 2" → "EG", "Drums (Live)" → "Drums". */
+export function busGroupName(name: string): string {
+  const n = name
+    .replace(/\s*\([^)]*\)\s*/g, ' ')
+    .replace(/[\s_-]*\d+$/, '')
+    .trim()
+  return n || name
+}
+
 export const KEYS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'] as const
 
 const SHARP_TO_FLAT: Record<string, string> = { 'C#': 'Db', 'D#': 'Eb', 'F#': 'Gb', 'G#': 'Ab', 'A#': 'Bb', Cb: 'B', Fb: 'E', 'E#': 'F', 'B#': 'C' }
