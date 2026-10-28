@@ -16,6 +16,7 @@ import {
   setCurrentSetlist,
   setlistSongs,
   setlistsWith,
+  SONG_DRAG,
   useLibrary,
 } from '../library/store'
 import { type MenuEntry, confirmDialog, isAsking, promptDialog, showContextMenu } from './Ask'
@@ -82,6 +83,8 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
   const [selected, setSelected] = useState<number | null>(null)
   const [dragFrom, setDragFrom] = useState<number | null>(null)
   const [dropAt, setDropAt] = useState<number | null>(null)
+  /** The setlist at the side a song is being dragged over. */
+  const [dropOn, setDropOn] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
   const all = useMemo(() => librarySongs(lib), [lib])
@@ -152,12 +155,15 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
     if (desktop && song.source === 'library') {
       items.push('separator', { label: 'Show Files', onClick: () => void desktop!.library.reveal(song.id) })
     }
-    items.push('separator', {
-      label: 'Delete from Library…',
-      hint: view === 'library' ? '⌫' : undefined,
-      danger: true,
-      onClick: () => void confirmDeleteSong(song, { playingNow: playing && song.id === currentSongId }),
-    })
+    // Deleting from the library is only offered in the library, never from a setlist.
+    if (view === 'library') {
+      items.push('separator', {
+        label: 'Delete from Library…',
+        hint: '⌫',
+        danger: true,
+        onClick: () => void confirmDeleteSong(song, { playingNow: playing && song.id === currentSongId }),
+      })
+    }
     return items
   }
 
@@ -187,7 +193,27 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
             {lib.setlists.map((sl) => (
               <div
                 key={sl.id}
-                className={`sl-side-item ${view === 'setlist' && sl.id === current.id ? 'active' : ''} ${sl.id === current.id ? 'current' : ''}`}
+                className={`sl-side-item ${view === 'setlist' && sl.id === current.id ? 'active' : ''} ${sl.id === current.id ? 'current' : ''} ${
+                  dropOn === sl.id ? 'drop-target' : ''
+                }`}
+                onDragOver={(e) => {
+                  if (!e.dataTransfer.types.includes(SONG_DRAG)) return
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'copy'
+                  setDropOn(sl.id)
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropOn(null)
+                }}
+                onDrop={(e) => {
+                  const id = e.dataTransfer.getData(SONG_DRAG)
+                  setDropOn(null)
+                  setDragFrom(null)
+                  setDropAt(null)
+                  if (!id) return
+                  e.preventDefault()
+                  addToSetlist(sl.id, [id])
+                }}
                 onClick={() => {
                   setCurrentSetlist(sl.id)
                   setView('setlist')
@@ -258,11 +284,17 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
                     setSelected(i)
                     showContextMenu(e, songMenu(song, i))
                   }}
-                  draggable={view === 'setlist'}
+                  draggable
                   onDragStart={(e) => {
-                    setDragFrom(i)
-                    e.dataTransfer.effectAllowed = 'move'
-                    e.dataTransfer.setData('text/plain', String(i))
+                    // Any song can be dragged onto a setlist at the side; in a setlist, also to reorder it.
+                    e.dataTransfer.setData(SONG_DRAG, song.id)
+                    if (view === 'setlist') {
+                      setDragFrom(i)
+                      e.dataTransfer.effectAllowed = 'copyMove'
+                      e.dataTransfer.setData('text/plain', String(i))
+                    } else {
+                      e.dataTransfer.effectAllowed = 'copy'
+                    }
                   }}
                   onDragOver={(e) => {
                     if (dragFrom === null) return
@@ -281,10 +313,11 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
                   onDragEnd={() => {
                     setDragFrom(null)
                     setDropAt(null)
+                    setDropOn(null)
                   }}
                 >
                   {view === 'setlist' && <span className="sl-num">{i + 1}</span>}
-                  <img src={song.artwork} alt="" />
+                  <img src={song.artwork} alt="" draggable={false} />
                   <span className="sl-title">
                     {song.title}
                     {song.artist && <span className="sl-artist">{song.artist}</span>}
@@ -316,16 +349,18 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
                       −
                     </button>
                   )}
-                  <button
-                    className="sl-icon sl-trash"
-                    title="Delete from Library"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      void confirmDeleteSong(song, { playingNow: playing && song.id === currentSongId })
-                    }}
-                  >
-                    <TrashIcon />
-                  </button>
+                  {view === 'library' && (
+                    <button
+                      className="sl-icon sl-trash"
+                      title="Delete from Library"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void confirmDeleteSong(song, { playingNow: playing && song.id === currentSongId })
+                      }}
+                    >
+                      <TrashIcon />
+                    </button>
+                  )}
                 </div>
               )
             })}
@@ -353,7 +388,12 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
               <button className="small" onClick={() => setView('library')}>
                 + Add Songs
               </button>
-              <span className="muted">Drag to reorder · Double-click to load · ⌫ removes from the setlist</span>
+              <span className="muted">Drag to reorder, or onto another setlist · Double-click to load · ⌫ removes from the setlist</span>
+            </footer>
+          )}
+          {view === 'library' && shown.length > 0 && (
+            <footer className="sl-foot">
+              <span className="muted">Drag songs onto a setlist at the side · Double-click adds to “{current.name}”</span>
             </footer>
           )}
         </section>

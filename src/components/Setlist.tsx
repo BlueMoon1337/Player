@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import type { Song } from '../audio/types'
 import type { SongEnd, SongEndSetting } from '../platform/types'
+import { SONG_DRAG } from '../library/store'
 import { type MenuEntry, showContextMenu } from './Ask'
 import { Popover } from './Popover'
 
@@ -16,8 +17,8 @@ interface Props {
   /** Takes the song at this position out of the setlist (it stays in the library). */
   onRemove: (index: number) => void
   onMove: (index: number, dir: -1 | 1) => void
-  /** Asks, then deletes the song from the library. */
-  onDelete: (song: Song) => void
+  /** A library song dropped on the setlist, to go in at this position. */
+  onDropSong: (songId: string, index: number) => void
   /** Edit mode ("Setlist / Song Map"): Playback's big cards with their controls. */
   editing: boolean
   /** What happens when each song ends, and changing it. */
@@ -155,10 +156,38 @@ function EndMenu({
 }
 
 export function Setlist(p: Props) {
-  const { songs, currentId, onSelect, onImport, onImportClick, onRemove, onMove, onDelete, editing } = p
+  const { songs, currentId, onSelect, onImport, onImportClick, onRemove, onMove, editing } = p
   const input = useRef<HTMLInputElement>(null)
   /** The end-of-song popover: which card (by position) and where its button is. */
   const [endMenu, setEndMenu] = useState<{ index: number; anchor: DOMRect } | null>(null)
+  /** Where a song being dragged in would go. */
+  const [dropAt, setDropAt] = useState<number | null>(null)
+
+  /** A song dragged from the library goes before the first card whose middle is right of the pointer. */
+  const dropProps = {
+    onDragOver: (e: React.DragEvent<HTMLDivElement>) => {
+      if (!e.dataTransfer.types.includes(SONG_DRAG)) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+      const cards = [...e.currentTarget.querySelectorAll<HTMLElement>('[data-index]')]
+      const at = cards.find((c) => {
+        const r = c.getBoundingClientRect()
+        return e.clientX < r.left + r.width / 2
+      })
+      setDropAt(at ? Number(at.dataset.index) : songs.length)
+    },
+    onDragLeave: (e: React.DragEvent<HTMLDivElement>) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(null)
+    },
+    onDrop: (e: React.DragEvent<HTMLDivElement>) => {
+      const id = e.dataTransfer.getData(SONG_DRAG)
+      if (!id) return
+      e.preventDefault()
+      p.onDropSong(id, dropAt ?? songs.length)
+      setDropAt(null)
+    },
+  }
+  const dropClass = (i: number) => (dropAt === i ? 'drop-before' : '')
   const menu = (s: Song, i: number): MenuEntry[] => [
     { label: 'Load', onClick: () => onSelect(s.id) },
     { label: 'Song Settings…', onClick: () => p.onSongSettings(s.id) },
@@ -166,8 +195,6 @@ export function Setlist(p: Props) {
     { label: 'Move Left', disabled: i === 0, onClick: () => onMove(i, -1) },
     { label: 'Move Right', disabled: i === songs.length - 1, onClick: () => onMove(i, 1) },
     { label: 'Remove from Setlist', onClick: () => onRemove(i) },
-    'separator',
-    { label: 'Delete from Library…', danger: true, onClick: () => onDelete(s) },
   ]
   const picker = (
     <input
@@ -186,12 +213,12 @@ export function Setlist(p: Props) {
 
   if (editing) {
     return (
-      <div className="setlist editing">
+      <div className="setlist editing" {...dropProps}>
         {songs.map((s, i) => {
           const setting = p.songEnd(s.id)
           const end = shownEnd(setting, i === songs.length - 1)
           return (
-            <div key={`${s.id}-${i}`} className={`ecard-wrap ${s.id === currentId ? 'active' : ''}`}>
+            <div key={`${s.id}-${i}`} data-index={i} className={`ecard-wrap ${s.id === currentId ? 'active' : ''} ${dropClass(i)}`}>
               <div className="ecard" onContextMenu={(e) => showContextMenu(e, menu(s, i))} onDoubleClick={() => onSelect(s.id)}>
                 <img className="ecard-art" src={s.artwork} alt="" draggable={false} />
                 <button className="ec-btn ec-remove" title="Remove from setlist (stays in the library)" onClick={() => onRemove(i)}>
@@ -240,7 +267,7 @@ export function Setlist(p: Props) {
             </div>
           )
         })}
-        <div className="ecard-wrap">
+        <div className={`ecard-wrap ${dropClass(songs.length)}`}>
           <button className="ecard ecard-add" onClick={(e) => p.onAddSong(undefined, e.currentTarget.getBoundingClientRect())}>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 5v14M5 12h14" />
@@ -264,11 +291,12 @@ export function Setlist(p: Props) {
   }
 
   return (
-    <div className="setlist">
+    <div className="setlist" {...dropProps}>
       {songs.map((s, i) => (
         <div
           key={`${s.id}-${i}`}
-          className={`song-card ${s.id === currentId ? 'active' : ''}`}
+          data-index={i}
+          className={`song-card ${s.id === currentId ? 'active' : ''} ${dropClass(i)}`}
           onContextMenu={(e) => showContextMenu(e, menu(s, i))}
         >
           <button className="song-card-main" onClick={() => onSelect(s.id)} title={s.artist ? `${s.title} — ${s.artist}` : s.title}>
@@ -283,9 +311,11 @@ export function Setlist(p: Props) {
           </button>
         </div>
       ))}
-      {songs.length === 0 && <div className="setlist-empty">This setlist is empty. Open the Setlists menu to add songs.</div>}
+      {songs.length === 0 && (
+        <div className="setlist-empty">This setlist is empty. Open the Setlists menu to add songs, or drag them in.</div>
+      )}
       <button
-        className="song-card add"
+        className={`song-card add ${dropClass(songs.length)}`}
         onClick={() => (onImportClick ? onImportClick() : input.current?.click())}
         title="Import songs: MultiTracks zips, song folders or audio files"
       >

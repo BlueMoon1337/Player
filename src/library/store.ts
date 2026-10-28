@@ -14,6 +14,9 @@ import { UNDO_KEY, record, showNote } from './history'
 
 export type Setlist = SetlistRecord
 
+/** Drag-and-drop type for a library song (its id) dragged onto a setlist. */
+export const SONG_DRAG = 'application/x-player-song'
+
 export interface LibrarySnapshot {
   ready: boolean
   root: string | null

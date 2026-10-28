@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { type Song, formatTime, sectionAbbrev, sectionColor } from '../audio/types'
-import { librarySongs, useLibrary } from '../library/store'
+import { SONG_DRAG, librarySongs, useLibrary } from '../library/store'
 import { Popover } from './Popover'
 
 interface Props {
@@ -108,7 +108,12 @@ export function LibraryPicker({ anchor, setlistName, position, onAdd, onImport, 
       className="lp-row lp-song"
       onClick={() => go({ kind: 'song', id: s.id })}
       onDoubleClick={() => onAdd(s.id)}
-      title={`${s.title}: double-click to add`}
+      title={`${s.title}: double-click to add, or drag it into the setlist`}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(SONG_DRAG, s.id)
+        e.dataTransfer.effectAllowed = 'copy'
+      }}
     >
       <img src={s.artwork} alt="" draggable={false} />
       <span className="lp-text">

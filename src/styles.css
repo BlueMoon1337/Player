@@ -1738,11 +1738,15 @@ button.destructive {
 /* ------------------------------------------- edit mode: setlist / song map */
 /* After Playback's "Setlist / Song Map" edit mode. */
 
+/* Playback's proportions while editing: the setlist about a quarter of the window, the song map a
+   little more, and the mixer the rest. The cards scale with their row. */
 .app.editing {
-  grid-template-rows: auto 190px minmax(210px, 36vh) 1fr;
+  --setlist-row: max(150px, 24vh);
+  --card-h: calc(var(--setlist-row) - 60px);
+  grid-template-rows: auto var(--setlist-row) minmax(170px, 26vh) minmax(0, 1fr);
 }
 .app.editing.no-setlist {
-  grid-template-rows: auto minmax(210px, 40vh) 1fr;
+  grid-template-rows: auto minmax(170px, 30vh) minmax(0, 1fr);
 }
 .app.editing .mixer {
   opacity: 0.55;
@@ -1758,12 +1762,13 @@ button.t-edit.on {
 
 .setlist.editing {
   gap: 16px;
-  padding: 16px 20px 8px;
+  padding: 14px 20px 6px;
   align-items: flex-start;
   background: #0a0b0d;
 }
 .ecard-wrap {
-  flex: 0 0 236px;
+  position: relative;
+  flex: 0 0 calc(var(--card-h, 132px) * 1.8);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1771,7 +1776,7 @@ button.t-edit.on {
 }
 .ecard {
   position: relative;
-  height: 132px;
+  height: var(--card-h, 132px);
   border-radius: 10px;
   background: #18191d;
 }
@@ -2417,4 +2422,27 @@ button.smap-btn:hover {
 }
 .lp-add:hover {
   filter: brightness(1.1);
+}
+
+/* A song dragged in from the library: a bar where it will go. */
+.ecard-wrap.drop-before::before,
+.song-card.drop-before::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -10px;
+  width: 4px;
+  height: var(--card-h, 100%);
+  border-radius: 2px;
+  background: #3b82f6;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.7);
+  z-index: 3;
+}
+.song-card.drop-before::before {
+  left: -6px;
+  height: 100%;
+}
+.sl-side-item.drop-target {
+  background: rgba(59, 130, 246, 0.25);
+  box-shadow: inset 0 0 0 2px #3b82f6;
 }

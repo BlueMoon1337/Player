@@ -10,7 +10,7 @@ import { type LowerView, Mixer } from './components/Mixer'
 import { Menu, OutputsDialog, SongSettingsDialog } from './components/Panels'
 import { Setlist } from './components/Setlist'
 import { LibraryPicker } from './components/LibraryPicker'
-import { SetlistsMenu, confirmDeleteSong } from './components/SetlistsMenu'
+import { SetlistsMenu } from './components/SetlistsMenu'
 import { Timeline } from './components/Timeline'
 import { Transport } from './components/Transport'
 import { UpdateDialog } from './components/UpdateDialog'
@@ -557,8 +557,6 @@ export default function App() {
     [],
   )
 
-  const deleteFromLibrary = (s: Song) => void confirmDeleteSong(s, { playingNow: state.playing && s.id === currentId })
-
   return (
     <div className={`app ${setlistOpen ? '' : 'no-setlist'} ${editing ? 'editing' : ''}`}>
       <Transport
@@ -592,7 +590,7 @@ export default function App() {
           onImportClick={desktop ? () => openImport() : undefined}
           onRemove={(i) => setlist && removeFromSetlist(setlist.id, i)}
           onMove={(i, dir) => setlist && moveInSetlist(setlist.id, i, i + dir)}
-          onDelete={deleteFromLibrary}
+          onDropSong={(id, index) => setlist && addToSetlist(setlist.id, [id], index)}
         />
       )}
       <Timeline

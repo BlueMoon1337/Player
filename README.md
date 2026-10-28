@@ -42,12 +42,12 @@ A multitrack backing-track player for live worship and band use, in the spirit o
     - **Continue Pad** turns the pad on when the song ends, so there's no silence before the next one.
 
     With AutoLink, Overlap or Crossfade, the next song is loaded in the background while this one plays, so it starts without a gap.
-  - **Library:** a **+** opens the Library beside it: **Songs**, **Albums** and **Artists**, each in alphabetical order, plus the most recently imported songs. Search covers titles, artists and albums. A song's page shows its key, tempo, length and sections, and adds it to the setlist at that spot.
+  - **Library:** drag a song from the Library popover into the setlist, between any two cards. A **+** opens the Library beside it: **Songs**, **Albums** and **Artists**, each in alphabetical order, plus the most recently imported songs. Search covers titles, artists and albums. A song's page shows its key, tempo, length and sections, and adds it to the setlist at that spot.
   - **Song Map:** the sections over the waveform. Click a badge to jump there, or its loop button to loop it. **−** deletes a section, **+** adds one after it, and **•••** has the rest (rename, change type, move its start to the playhead). The **+** at the far left adds a section at the playhead. Everything can be undone.
 - **Library and setlists.** Every song, imported or demo, lives in the library. Setlists are named, ordered lists of library songs, and the main window plays the current one. Open them with the Setlists Menu button:
-  - **All Songs:** search the library, and **+ Add** a song to the current setlist (or double-click it).
+  - **All Songs:** search the library, and **+ Add** a song to the current setlist (or double-click it). Drag a song onto any setlist at the side to add it there. Songs are deleted from the library only here; a setlist only removes them from itself.
   - **Setlists:** **+** makes one, and clicking one makes it current. Double-click a setlist to rename it, or right-click it to rename, duplicate or delete it.
-  - **In a setlist:** drag songs to reorder them, and double-click a song to load it.
+  - **In a setlist:** drag songs to reorder them, or onto another setlist to add them there, and double-click a song to load it.
   - **Importing** adds the new song to the library and to the end of the current setlist.
 - **Mixer (the lower part, as in Playback).** Each strip has **S** (solo) at the top, a meter beside the fader, and its name at the bottom: click the name to mute it (it greys out). The **›** beside the Click strip shows its parts (Accent, 1/4, 1/8, 1/16, or the song's Click Track). Right-click a strip to reset it or choose its output. The Master strip has left and right meters and a limiter. Levels are saved between sessions.
 - **Side buttons.**
