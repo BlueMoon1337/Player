@@ -38,7 +38,7 @@ export function Setlist({ songs, currentId, onSelect, onImport, onImportClick, o
           className={`song-card ${s.id === currentId ? 'active' : ''}`}
           onContextMenu={(e) => showContextMenu(e, menu(s, i))}
         >
-          <button className="song-card-main" onClick={() => onSelect(s.id)} title={s.title}>
+          <button className="song-card-main" onClick={() => onSelect(s.id)} title={s.artist ? `${s.title} — ${s.artist}` : s.title}>
             <img src={s.artwork} alt="" />
             <div className="song-card-text">
               <div className="song-card-title">{s.title}</div>
@@ -67,15 +67,15 @@ export function Setlist({ songs, currentId, onSelect, onImport, onImportClick, o
       <button
         className="song-card add"
         onClick={() => (onImportClick ? onImportClick() : input.current?.click())}
-        title="Import stems as a new song"
+        title="Import songs: MultiTracks zips, song folders or audio files"
       >
         <span className="add-plus">+</span>
-        <span>Import stems</span>
+        <span>Import songs</span>
       </button>
       <input
         ref={input}
         type="file"
-        accept="audio/*,.wav,.wave,.bwf,.rf64,.mp3,.m4a,.aif,.aiff,.flac,.ogg"
+        accept="audio/*,.wav,.wave,.bwf,.rf64,.mp3,.m4a,.aif,.aiff,.flac,.ogg,.zip,application/zip"
         multiple
         hidden
         onChange={(e) => {

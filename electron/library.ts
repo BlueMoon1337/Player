@@ -1,8 +1,7 @@
 import { randomBytes } from 'node:crypto'
-import { constants } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import type { CreatedSong, LibraryData, LibraryState, SetlistRecord, SongRecord } from '../src/platform/types'
+import type { LibraryData, LibraryState, SetlistRecord, SongRecord } from '../src/platform/types'
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/
 
@@ -17,7 +16,20 @@ export function assertFileName(name: unknown): asserts name is string {
   }
 }
 
-function safeFileName(name: string): string {
+export function newSongId() {
+  return `song-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`
+}
+
+/** A file name that's safe on every OS and not yet used in this song folder (case-insensitively). */
+export function uniqueFileName(name: string, used: Set<string>): string {
+  const ext = path.extname(name)
+  let file = safeFileName(name)
+  for (let n = 2; used.has(file.toLowerCase()); n++) file = `${safeFileName(path.basename(name, ext))} ${n}${ext}`
+  used.add(file.toLowerCase())
+  return file
+}
+
+export function safeFileName(name: string): string {
   const cleaned = path
     .basename(name)
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
@@ -99,35 +111,11 @@ export class Library {
     return { root: this.root, songs, state }
   }
 
-  async createSong(paths: string[]): Promise<CreatedSong> {
-    const songId = `song-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`
-    const dir = this.songDir(songId)
-    await fs.mkdir(dir, { recursive: true })
-    const files: CreatedSong['files'] = []
-    const failed: CreatedSong['failed'] = []
-    const used = new Set<string>()
-    for (const src of paths) {
-      const name = path.basename(src)
-      let file = safeFileName(name)
-      for (let n = 2; used.has(file.toLowerCase()); n++) {
-        const ext = path.extname(name)
-        file = `${safeFileName(path.basename(name, ext))} ${n}${ext}`
-      }
-      try {
-        await fs.copyFile(src, path.join(dir, file), constants.COPYFILE_EXCL)
-        used.add(file.toLowerCase())
-        files.push({ name, file })
-      } catch (e) {
-        failed.push({ name, reason: (e as NodeJS.ErrnoException).code === 'ENOENT' ? 'file not found' : 'could not copy file' })
-      }
-    }
-    return { songId, files, failed }
-  }
-
   async saveSong(rec: SongRecord) {
     assertId(rec?.id)
     if (rec.version !== 1 || !Array.isArray(rec.stems)) throw new Error('Invalid song record')
     for (const s of rec.stems) assertFileName(s.file)
+    if (rec.artwork !== undefined) assertFileName(rec.artwork)
     await writeJsonAtomic(path.join(this.songDir(rec.id), 'song.json'), rec)
   }
 

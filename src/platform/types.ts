@@ -1,6 +1,7 @@
 // Contract between the renderer and the Electron main process. Types only: imported by both sides.
 
 import type { Section } from '../audio/types'
+import type { AbletonSong } from '../import/ableton'
 
 /** A song as saved in `<library>/Songs/<id>/song.json`. */
 export interface SongRecord {
@@ -14,6 +15,11 @@ export interface SongRecord {
   duration: number
   sections: Section[]
   stems: { id: string; name: string; file: string }[]
+  artist?: string
+  /** Cover picture in the song folder (e.g. a MultiTracks download's Album.jpg). */
+  artwork?: string
+  /** The stem used as the click (a MultiTracks "Click Track"); otherwise the click is generated. */
+  clickStem?: string | null
 }
 
 export interface SetlistRecord {
@@ -40,15 +46,34 @@ export interface LibraryData {
 }
 
 export interface CreatedSong {
+  /** '' when nothing could be imported from this zip or folder (see `failed`). */
   songId: string
+  /** The zip or folder the song came from; a MultiTracks name carries title, artist, key and BPM. */
+  sourceName?: string
   /** Copied stems: original file name and the name it was saved under. */
   files: { name: string; file: string }[]
   /** Files that couldn't be copied. */
   failed: { name: string; reason: string }[]
+  /** Cover picture saved in the song folder. */
+  artwork?: string
+  /** What the download's Ableton set says: tempo, time signature, section markers. */
+  ableton?: AbletonSong | null
+}
+
+export interface ImportProgress {
+  /** Which song (zip / folder) of how many. */
+  song: number
+  songs: number
+  source: string
+  /** The file being copied or unzipped, and bytes done of the whole song. */
+  name: string
+  done: number
+  total: number
 }
 
 export type MenuCommand =
   | 'import'
+  | 'import-folder'
   | 'toggle-play'
   | 'prev'
   | 'next'
@@ -94,10 +119,14 @@ export interface DesktopAPI {
   platform: string
   library: {
     load(): Promise<LibraryData>
-    /** Native multi-select dialog for stems. Resolves to [] if cancelled. */
-    pickStems(): Promise<string[]>
-    /** Copies stem files into a new song folder. */
-    createSong(paths: string[]): Promise<CreatedSong>
+    /**
+     * Native dialog for audio files and zips ('files'), or folders ('folders'; on a Mac the
+     * files dialog takes folders too). Resolves to [] if cancelled.
+     */
+    pickImport(kind: 'files' | 'folders'): Promise<string[]>
+    /** Each zip and folder becomes a song; loose audio files become one song together. */
+    importPaths(paths: string[]): Promise<CreatedSong[]>
+    onImportProgress(cb: (p: ImportProgress) => void): () => void
     saveSong(record: SongRecord): Promise<void>
     removeFiles(songId: string, files: string[]): Promise<void>
     /** Deletes a song; it can be restored until Player next starts (Undo). */

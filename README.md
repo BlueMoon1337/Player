@@ -41,7 +41,16 @@ A multitrack backing-track player for live worship and band use, in the spirit o
   - **Pad Player** is an ambient pad that keeps playing between songs and can follow the song's key.
   - **Mute MIDI** silences the MIDI messages the app sends (start, stop, continue, and a program change on each song change).
   - **Link** rolls into the next song when the current one ends.
-- **WAV import.** Player has its own WAV reader, which runs in a background worker so large stems don't freeze the UI. It handles:
+- **Importing songs.** Use **Import songs**, **File ▸ Import Songs…** (⌘/Ctrl+I) or **Import Folder…** (⇧⌘/Ctrl+Shift+I), or drop files on the window. You can import several at once:
+  - **MultiTracks.com zips** (e.g. `Goodness of God-Victory-Ab-63.00bpm.zip`), and the folders they unzip to. Each becomes a song:
+    - Title, artist, key and BPM come from the name.
+    - The stems are the WAVs in the `MultiTracks/` folder, and `Album.jpg` becomes the cover.
+    - The song sections come from the Ableton set's locators (`MultiTrack.als`). Their times follow its tempo map, including tempo changes.
+    - Ableton project files and the hidden `__MACOSX/._*` copies Macs add are left out.
+  - **Large zips are fine.** They're read straight from disk, one stem at a time, and each stem is checked against the zip's CRC-32. A damaged file is skipped and the app says so; the rest of the song still imports.
+  - **Any other folder** of stems becomes a song, and **loose audio files** dropped together become one song.
+- **Click Track.** A song with a click stem (MultiTracks' **Click Track**) plays it as the click. It goes through the Click fader and the Click bus's output routing (e.g. to the in-ear outputs), and the generated click stays silent. The song's own click follows its tempo changes, which a click generated from one BPM can't. Change it in **EDIT ▸ Song ▸ Click** (Generated, or any stem); the change is undoable.
+- **WAV decoding.** Player has its own WAV reader. It runs on several CPU cores at once, so a song's stems load in parallel and large stems don't freeze the UI. It handles:
   - 8/16/24/32-bit PCM, 32/64-bit float, A-law and µ-law
   - WAVE_FORMAT_EXTENSIBLE files, RF64/BW64 files over 4 GB, and recorder files whose headers were never finalised
   - Metadata DAWs embed in exports: cue markers with labels become song sections, the `acid` chunk sets tempo and meter, and `LIST/INFO` sets the song title
@@ -68,7 +77,7 @@ Everything above can be undone, along with adding, moving, renaming and importin
 - A deleted song's files are kept in the library's hidden `.Trash` folder until Player next starts, so undo can bring them back. After that, they go to the system Trash.
 - Player's questions are its own windows: Return answers yes and Escape answers no.
 
-The web version keeps imported songs in memory only. It can choose an output device only in browsers that support `AudioContext.setSinkId`.
+The web version keeps imported songs in memory only, and can import zips and audio files but not folders. It can choose an output device only in browsers that support `AudioContext.setSinkId`.
 
 ## Keyboard
 
@@ -147,6 +156,6 @@ To try updates against a stand-in for GitHub, set `PLAYER_UPDATE_API` to its add
 
 ## Notes / next steps
 
-- Stems are decoded fully into memory, so a song with many long stems uses a lot of RAM. Only the current song is kept loaded. Streaming stems from disk would remove this limit.
+- Stems are decoded fully into memory, so a song with many long stems uses a lot of RAM: a typical 17-stem MultiTracks song needs about 1.5 GB. Only the current song is kept loaded. Streaming stems from disk would remove this limit.
 - With **Link**, the next song loads from disk when the current one ends, so there's a short gap. Preloading the next song would remove it.
 - The Guide stem in the demo songs plays cue chimes, not spoken cues.

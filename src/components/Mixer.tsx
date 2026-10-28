@@ -80,7 +80,9 @@ export function Mixer({ engine, state, panel, setPanel, link, setLink, padOn }: 
     )
   }
 
-  const clicks = state.channels.filter((c) => c.group === 'click')
+  // A song playing its own click stem shows that instead of the generated click's parts.
+  const generated = new Set(['accent', 'q', 'e', 's'])
+  const clicks = state.channels.filter((c) => c.group === 'click' && !(state.audioClick && generated.has(c.id)))
   const stems = state.channels.filter((c) => c.group === 'stem')
 
   return (

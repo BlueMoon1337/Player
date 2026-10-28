@@ -23,6 +23,8 @@ interface Channel {
   panner: StereoPannerNode
   analyser: AnalyserNode
   settings: ChannelSettings
+  /** One of the loaded song's stems (removed when another song loads). */
+  fromSong: boolean
 }
 
 /** Per-route output stage: its own fade, master and limiter, then into the device channels. */
@@ -57,6 +59,8 @@ export interface EngineState {
   outputCount: number
   /** '' means the system default device. */
   outputDeviceId: string
+  /** The song's own click stem is playing as the click (the generated one is silent). */
+  audioClick: boolean
 }
 
 const MIX_KEY = 'player.mix.v1'
@@ -255,7 +259,7 @@ export class Engine {
 
   // ---------------------------------------------------------------- channels
 
-  private createChannel(id: string, name: string, group: 'click' | 'stem'): Channel {
+  private createChannel(id: string, name: string, group: 'click' | 'stem', fromSong = false): Channel {
     const saved = loadMix()[id] ?? {}
     const input = this.ctx.createGain()
     const gain = this.ctx.createGain()
@@ -273,6 +277,7 @@ export class Engine {
       panner,
       analyser,
       settings: { ...DEFAULT_SETTINGS, ...saved, solo: false, bus: normalizeBus(saved.bus ?? 'main') },
+      fromSong,
     }
     this.channels.set(id, ch)
     this.order.push(id)
@@ -342,18 +347,10 @@ export class Engine {
     this.loop = null
     this.pendingJump = null
     this.song = song
-    // Drop previous stem channels.
-    for (const id of [...this.order]) {
-      const ch = this.channels.get(id)!
-      if (ch.group === 'stem') {
-        ch.gain.disconnect()
-        ch.panner.disconnect()
-        this.channels.delete(id)
-        this.order = this.order.filter((o) => o !== id)
-      }
-    }
+    this.dropSongChannels()
     for (const stem of song.stems) {
-      const ch = this.createChannel(stem.id, stem.name, 'stem')
+      // A click stem (e.g. MultiTracks' Click Track) joins the click group and feeds the Click bus.
+      const ch = this.createChannel(stem.id, stem.name, stem.id === song.clickStem ? 'click' : 'stem', true)
       ch.buffer = stem.buffer
     }
     this.regenerateClick()
@@ -369,28 +366,48 @@ export class Engine {
     this.loop = null
     this.pendingJump = null
     this.song = null
+    this.dropSongChannels()
+    for (const ch of this.channels.values()) ch.buffer = null
+    this.emit()
+  }
+
+  private dropSongChannels() {
     for (const id of [...this.order]) {
       const ch = this.channels.get(id)!
-      if (ch.group === 'stem') {
-        ch.gain.disconnect()
-        ch.panner.disconnect()
-        this.channels.delete(id)
-        this.order = this.order.filter((o) => o !== id)
-      } else {
-        ch.buffer = null
-      }
+      if (!ch.fromSong) continue
+      ch.gain.disconnect()
+      ch.panner.disconnect()
+      this.channels.delete(id)
+      this.order = this.order.filter((o) => o !== id)
     }
+  }
+
+  /** Whether the loaded song plays its own click stem instead of the generated click. */
+  private get audioClick() {
+    const id = this.song?.clickStem
+    return !!id && this.channels.get(id)?.fromSong === true
+  }
+
+  /** Loads the current song again (after its click source changes), keeping the position and play state. */
+  async reloadSong() {
+    if (!this.song) return
+    const pos = this.position
+    const wasPlaying = this.playing
+    this.load(this.song)
+    this.pausedPos = Math.min(pos, this.song.duration)
     this.emit()
+    if (wasPlaying) await this.play()
   }
 
   /** Re-renders the click after tempo / meter / offset changes. */
   regenerateClick() {
     if (!this.song) return
-    const bufs = renderClick(this.ctx, this.song)
-    this.channels.get('accent')!.buffer = bufs.accent
-    this.channels.get('q')!.buffer = bufs.q
-    this.channels.get('e')!.buffer = bufs.e
-    this.channels.get('s')!.buffer = bufs.s
+    // With the song's own click stem playing, the generated click stays silent.
+    const bufs = this.audioClick ? null : renderClick(this.ctx, this.song)
+    this.channels.get('accent')!.buffer = bufs?.accent ?? null
+    this.channels.get('q')!.buffer = bufs?.q ?? null
+    this.channels.get('e')!.buffer = bufs?.e ?? null
+    this.channels.get('s')!.buffer = bufs?.s ?? null
     if (this.playing) this.seek(this.position)
   }
 
@@ -715,6 +732,7 @@ export class Engine {
       masterVolume: this.masterVolume,
       outputCount: this.outputCount,
       outputDeviceId: this.outputDeviceId,
+      audioClick: this.audioClick,
       channels: this.order.map((id) => {
         const c = this.channels.get(id)!
         return { id: c.id, name: c.name, group: c.group, settings: c.settings }

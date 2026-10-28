@@ -32,19 +32,51 @@ async function fillBuffer(buffer: AudioBuffer, channels: Float32Array[]) {
   }
 }
 
-let worker: Worker | null = null
+/**
+ * Several decoders, one per spare CPU core (up to four), so a song's stems decode side by side:
+ * a MultiTracks song can have twenty stems of a minute's decoding work between them.
+ */
+export const DECODERS = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1))
+
+interface PooledWorker {
+  worker: Worker
+  busy: number
+}
+const pool: PooledWorker[] = []
 let nextId = 1
 const pending = new Map<number, (r: DecodeResponse) => void>()
 
+/** The least busy decoder (starting new ones until the pool is full). */
 function getWorker(): Worker {
-  if (!worker) {
-    worker = new Worker(new URL('./decoder.worker.ts', import.meta.url), { type: 'module' })
+  let pick = pool.find((w) => w.busy === 0)
+  if (!pick && pool.length < DECODERS) {
+    const worker = new Worker(new URL('./decoder.worker.ts', import.meta.url), { type: 'module' })
+    const entry: PooledWorker = { worker, busy: 0 }
     worker.onmessage = (e: MessageEvent<DecodeResponse>) => {
+      entry.busy--
       pending.get(e.data.id)?.(e.data)
       pending.delete(e.data.id)
     }
+    pool.push(entry)
+    pick = entry
   }
-  return worker
+  pick ??= pool.reduce((a, b) => (b.busy < a.busy ? b : a))
+  pick.busy++
+  return pick.worker
+}
+
+/** Runs `fn` over `items` with at most `limit` at a time; results stay in order. */
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length)
+  let next = 0
+  const run = async () => {
+    while (next < items.length) {
+      const i = next++
+      out[i] = await fn(items[i], i)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run))
+  return out
 }
 
 /**

@@ -1,12 +1,19 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { DesktopAPI, MenuCommand } from '../src/platform/types'
+import type { DesktopAPI, ImportProgress, MenuCommand } from '../src/platform/types'
 
 const api: DesktopAPI = {
   platform: process.platform,
   library: {
     load: () => ipcRenderer.invoke('library:load'),
-    pickStems: () => ipcRenderer.invoke('library:pick'),
-    createSong: (paths) => ipcRenderer.invoke('library:create', paths),
+    pickImport: (kind) => ipcRenderer.invoke('library:pick', kind),
+    importPaths: (paths) => ipcRenderer.invoke('library:import', paths),
+    onImportProgress: (cb) => {
+      const listener = (_e: Electron.IpcRendererEvent, p: ImportProgress) => cb(p)
+      ipcRenderer.on('library:import-progress', listener)
+      return () => {
+        ipcRenderer.removeListener('library:import-progress', listener)
+      }
+    },
     saveSong: (record) => ipcRenderer.invoke('library:save', record),
     removeFiles: (songId, files) => ipcRenderer.invoke('library:remove-files', songId, files),
     deleteSong: (songId) => ipcRenderer.invoke('library:delete', songId),

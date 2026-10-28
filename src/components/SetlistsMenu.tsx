@@ -286,6 +286,7 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
                   <img src={song.artwork} alt="" />
                   <span className="sl-title">
                     {song.title}
+                    {song.artist && <span className="sl-artist">{song.artist}</span>}
                     {song.id === currentSongId && <span className="sl-loaded">{playing ? 'Playing' : 'Loaded'}</span>}
                   </span>
                   <span className="sl-key">{song.key}</span>

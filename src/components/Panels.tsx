@@ -246,7 +246,8 @@ export function EditPanel({ engine, song, edit }: EditProps) {
           <label>
             Key
             <select value={song.key} onChange={(e) => edit('Change Key', () => (song.key = e.target.value))}>
-              {KEYS.map((k) => (
+              {/* Keys from a MultiTracks name ("Am", "F#") stay as written. */}
+              {[...((KEYS as readonly string[]).includes(song.key) ? [] : [song.key]), ...KEYS].map((k) => (
                 <option key={k}>{k}</option>
               ))}
             </select>
@@ -271,6 +272,22 @@ export function EditPanel({ engine, song, edit }: EditProps) {
             >
               {['2/4', '3/4', '4/4', '5/4', '6/8', '12/8'].map((t) => (
                 <option key={t}>{t}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="row">
+          <label className="wide" title="The song's own click stem (such as a MultiTracks Click Track) follows its tempo changes; the generated click follows the BPM above">
+            Click
+            <select
+              value={song.clickStem ?? ''}
+              onChange={(e) => edit('Change Click', () => (song.clickStem = e.target.value || null))}
+            >
+              <option value="">Generated</option>
+              {(song.stems.length ? song.stems : (song.stemFiles ?? [])).map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
               ))}
             </select>
           </label>

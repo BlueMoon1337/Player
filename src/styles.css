@@ -507,9 +507,16 @@ button.t-edit.on {
   display: flex;
   gap: 8px;
 }
+.panel .row {
+  flex-wrap: wrap;
+}
 .panel .row label {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 64px;
+  min-width: 64px;
+  white-space: nowrap;
+}
+.panel .row label.wide {
+  flex: 2 1 140px;
 }
 .panel .row input,
 .panel .row select {
@@ -1309,6 +1316,16 @@ button.link {
   white-space: nowrap;
   text-overflow: ellipsis;
   font-weight: 600;
+}
+.sl-artist {
+  font-weight: 400;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.song-card img,
+.sl-row img {
+  object-fit: cover;
 }
 .sl-loaded {
   font-size: 10px;

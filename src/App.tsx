@@ -4,7 +4,7 @@ import { type ImportResult, fileSource, importStems, isAudioFile } from './audio
 import { PadPlayer } from './audio/pad'
 import { computePeaks } from './audio/peaks'
 import { renderDemoStems } from './audio/synth'
-import { type Song, sectionIndexAt } from './audio/types'
+import { type Song, keyRoot, sectionIndexAt } from './audio/types'
 import { AskHost, ContextMenuHost, isAsking } from './components/Ask'
 import { Mixer } from './components/Mixer'
 import { BusesPanel, EditPanel, Menu, PadPanel } from './components/Panels'
@@ -27,7 +27,8 @@ import {
   useLibrary,
 } from './library/store'
 import { type MenuCommand, desktop } from './platform'
-import { importIntoLibrary, loadSongStems, recordFromSong } from './platform/library'
+import { type LibraryImport, importIntoLibrary, loadSongStems, recordFromSong } from './platform/library'
+import { readZipSong } from './import/webZip'
 import { checkForUpdates, startUpdateChecks, useUpdates } from './platform/updates'
 
 // One audio graph for the lifetime of the page.
@@ -47,9 +48,16 @@ function loadSettings(): { jumpMode: JumpMode; fadeSeconds: number; link: boolea
 
 type Notice = { kind: 'info' | 'warn' | 'error'; text: string }
 
-function importNotice({ song, skipped, notes }: ImportResult): Notice {
-  let text = `Imported ${song.stems.length} stem${song.stems.length === 1 ? '' : 's'}`
-  if (notes.length) text += ` · read ${notes.join(', ')} from the files`
+function importNotice({ results, failed }: LibraryImport): Notice {
+  const skipped = [...failed, ...results.flatMap((r) => r.skipped)]
+  let text: string
+  if (results.length === 1) {
+    const { song, notes } = results[0]
+    text = `Imported “${song.title}” (${song.stems.length} stem${song.stems.length === 1 ? '' : 's'})`
+    if (notes.length) text += ` · used ${notes.join(', ')}`
+  } else {
+    text = `Imported ${results.length} songs: ${results.map((r) => r.song.title).join(', ')}`
+  }
   if (skipped.length) text += `. Skipped ${skipped.map((f) => `${f.name} (${f.reason})`).join(', ')}`
   return { kind: skipped.length ? 'warn' : 'info', text }
 }
@@ -198,7 +206,7 @@ export default function App() {
       engine.load(target)
       setCurrentId(id)
       engine.sendMidi([0xc0, Math.max(0, songs.indexOf(target)) & 0x7f])
-      if (padFollow) setPadKey(target.key)
+      if (padFollow) setPadKey(keyRoot(target.key))
       if (autoplay) await engine.play()
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -247,36 +255,42 @@ export default function App() {
     else step(-1)
   }, [songs, currentId, step])
 
-  const runImport = useCallback(async (job: (progress: (d: number, t: number, n: string) => void) => Promise<ImportResult>) => {
+  /** Imports one or more songs: into the library, onto the end of the current setlist, first one loaded. */
+  const runImport = useCallback(async (job: (status: (text: string) => void) => Promise<LibraryImport>) => {
     setNotice(null)
-    setLoading('Importing stems…')
+    setLoading('Importing…')
     try {
-      const result = await job((d, t, n) => setLoading(progressText('Decoding')(d, t, n)))
-      const s = result.song
-      // Into the library, and onto the end of the current setlist.
-      importSongs([s])
-      peaks.current.set(s.id, computePeaks(s.stems, s.duration))
+      const imported = await job(setLoading)
+      const { results, failed } = imported
+      if (!results.length) throw new Error(failed.map((f) => `${f.name}: ${f.reason}`).join('; ') || 'nothing to import')
+      const songs = results.map((r) => r.song)
+      importSongs(songs)
+      for (const s of songs) peaks.current.set(s.id, computePeaks(s.stems, s.duration))
+      // Keep only the song being loaded in memory; library songs reload from disk when chosen.
+      for (const s of songs.slice(1)) if (s.source === 'library') s.stems = []
       engine.pause()
-      engine.load(s)
-      setCurrentId(s.id)
-      chooseEditMode('song')
-      setNotice(importNotice(result))
+      engine.load(songs[0])
+      setCurrentId(songs[0].id)
+      if (padFollow) setPadKey(keyRoot(songs[0].key))
+      if (songs.length === 1) chooseEditMode('song')
+      setNotice(importNotice(imported))
     } catch (e) {
       setNotice({ kind: 'error', text: `Couldn't import: ${(e as Error).message}` })
     } finally {
       setLoading(null)
     }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [padFollow])
 
-  /** Desktop: stems are copied into the library and saved with the song. */
+  /** Desktop: zips, folders and audio files are copied (unzipped) into the library, then decoded. */
   const importPaths = useCallback(
     (paths: string[]) => {
-      if (desktop && paths.length) void runImport((p) => importIntoLibrary(desktop!, engine.ctx, paths, p))
+      if (desktop && paths.length) void runImport((status) => importIntoLibrary(desktop!, engine.ctx, paths, status))
     },
     [runImport],
   )
 
-  /** Web: decoded in memory only. On desktop, dropped files are imported by path. */
+  /** Web: each zip is a song, loose audio files are one song; decoded in memory only. On desktop, by path. */
   const importFiles = useCallback(
     (files: File[]) => {
       if (desktop) {
@@ -285,16 +299,50 @@ export default function App() {
         else setNotice({ kind: 'error', text: 'Those files have no location on disk. Drag them in from a folder instead.' })
         return
       }
-      void runImport((p) => importStems(engine.ctx, files.map(fileSource), { onProgress: p }))
+      void runImport(async (status) => {
+        const results: ImportResult[] = []
+        const failed: LibraryImport['failed'] = []
+        const zips = files.filter((f) => /\.zip$/i.test(f.name))
+        const audio = files.filter((f) => !/\.zip$/i.test(f.name) && isAudioFile(f))
+        for (const f of files) {
+          if (!/\.zip$/i.test(f.name) && !isAudioFile(f)) failed.push({ name: f.name, reason: 'not an audio file or zip' })
+        }
+        for (const [i, zip] of zips.entries()) {
+          try {
+            const z = await readZipSong(zip)
+            const which = zips.length > 1 ? ` (${i + 1} of ${zips.length})` : ''
+            const r = await importStems(engine.ctx, z.sources, {
+              meta: { name: z.name, ableton: z.ableton, artwork: z.artwork },
+              onProgress: (d, t, n) => status(`Decoding ${z.name.title}${which}: ${d + 1} of ${t}, ${n}`),
+            })
+            r.skipped.push(...z.failed)
+            results.push(r)
+          } catch (e) {
+            failed.push({ name: zip.name, reason: (e as Error).message })
+          }
+        }
+        if (audio.length) {
+          try {
+            results.push(await importStems(engine.ctx, audio.map(fileSource), { onProgress: (d, t, n) => status(progressText('Decoding')(d, t, n)) }))
+          } catch (e) {
+            failed.push({ name: `${audio.length} files`, reason: (e as Error).message })
+          }
+        }
+        return { results, failed }
+      })
     },
     [runImport, importPaths],
   )
 
   const webPicker = useRef<HTMLInputElement>(null)
-  const openImport = useCallback(() => {
-    if (desktop) void desktop.library.pickStems().then(importPaths)
-    else webPicker.current?.click()
-  }, [importPaths])
+  /** Import Songs… (audio files and zips; folders too on a Mac) or Import Folder…. */
+  const openImport = useCallback(
+    (kind: 'files' | 'folders' = 'files') => {
+      if (desktop) void desktop.library.pickImport(kind).then(importPaths)
+      else webPicker.current?.click()
+    },
+    [importPaths],
+  )
 
   const toggleCurrentLoop = () => {
     const cur = engine.currentSong
@@ -345,6 +393,7 @@ export default function App() {
   const menuHandler = useRef<(cmd: MenuCommand) => void>(() => {})
   menuHandler.current = (cmd) => {
     if (cmd === 'import') openImport()
+    else if (cmd === 'import-folder') openImport('folders')
     else if (cmd === 'undo' || cmd === 'redo') doUndo(cmd === 'redo')
     else if (cmd === 'toggle-play') engine.toggle()
     else if (cmd === 'prev') onPrev()
@@ -381,8 +430,14 @@ export default function App() {
       if (!e.dataTransfer?.types.includes('Files')) return
       e.preventDefault()
       setDragging(false)
+      // A browser can't read a dropped folder's contents; the desktop app imports it by path.
+      const folders = [...e.dataTransfer.items].some((it) => it.webkitGetAsEntry?.()?.isDirectory)
+      if (!desktop && folders) {
+        setNotice({ kind: 'error', text: 'Drop the zip instead: the web version can’t open folders (the desktop app can).' })
+        return
+      }
       const files = [...(e.dataTransfer?.files ?? [])]
-      if (files.length) importFiles(desktop ? files : files.filter(isAudioFile))
+      if (files.length) importFiles(desktop ? files : files.filter((f) => isAudioFile(f) || /\.zip$/i.test(f.name)))
     }
     window.addEventListener('dragover', over)
     window.addEventListener('dragleave', leave)
@@ -398,9 +453,10 @@ export default function App() {
   // refresh the views, and save it to its folder (desktop) shortly after the last change.
   useEffect(
     () =>
-      onSongChanged((changed, timing) => {
+      onSongChanged((changed, kind) => {
         if (engine.currentSong === changed) {
-          if (timing) engine.regenerateClick()
+          if (kind.clickSource) void engine.reloadSong()
+          else if (kind.timing) engine.regenerateClick()
           engine.sectionsChanged()
         }
         setVersion((v) => v + 1)
@@ -446,7 +502,7 @@ export default function App() {
           editing={editMode === 'setlist'}
           onSelect={(id) => void selectSong(id)}
           onImport={importFiles}
-          onImportClick={desktop ? openImport : undefined}
+          onImportClick={desktop ? () => openImport() : undefined}
           onRemove={(i) => setlist && removeFromSetlist(setlist.id, i)}
           onMove={(i, dir) => setlist && moveInSetlist(setlist.id, i, i + dir)}
           onDelete={deleteFromLibrary}
@@ -473,7 +529,7 @@ export default function App() {
             followSong={padFollow}
             setFollowSong={(v) => {
               setPadFollow(v)
-              if (v && song) setPadKey(song.key)
+              if (v && song) setPadKey(keyRoot(song.key))
             }}
             padKey={padKey}
             setPadKey={setPadKey}
@@ -497,7 +553,7 @@ export default function App() {
           currentSongId={currentId}
           playing={state.playing}
           onLoadSong={(id) => void selectSong(id)}
-          onImport={openImport}
+          onImport={() => openImport()}
           onClose={() => setSetlistsOpen(false)}
         />
       )}
@@ -530,7 +586,7 @@ export default function App() {
       <input
         ref={webPicker}
         type="file"
-        accept="audio/*,.wav,.wave,.bwf,.rf64,.mp3,.m4a,.aif,.aiff,.flac,.ogg"
+        accept="audio/*,.wav,.wave,.bwf,.rf64,.mp3,.m4a,.aif,.aiff,.flac,.ogg,.zip,application/zip"
         multiple
         hidden
         onChange={(e) => {

@@ -21,11 +21,11 @@ import { pathToFileURL } from 'node:url'
 import type { LibraryState, MenuCommand, MenuState, SongRecord } from '../src/platform/types'
 import { Library, assertFileName, assertId } from './library'
 import * as updates from './updates'
+import { AUDIO_EXTENSIONS, importPaths } from './importer'
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL
 const RENDERER_DIR = path.join(__dirname, '..', 'dist')
 const APP_ORIGIN = 'app://player'
-const AUDIO_EXTENSIONS = ['wav', 'wave', 'bwf', 'rf64', 'aif', 'aiff', 'flac', 'mp3', 'm4a', 'aac', 'ogg', 'oga', 'opus']
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -271,7 +271,8 @@ function buildMenu() {
     {
       label: 'File',
       submenu: [
-        { label: 'Import Stems…', accelerator: 'CmdOrCtrl+I', click: () => send('import') },
+        { label: 'Import Songs…', accelerator: 'CmdOrCtrl+I', click: () => send('import') },
+        { label: 'Import Folder…', accelerator: 'CmdOrCtrl+Shift+I', click: () => send('import-folder') },
         sep,
         { label: 'Open Library Folder', click: () => void shell.openPath(library.root) },
         ...(isMac ? [] : [sep, settings, sep, { role: 'quit' } as MenuItemConstructorOptions]),
@@ -374,29 +375,31 @@ function handle(channel: string, fn: (...args: any[]) => unknown) {
 function registerIpc() {
   handle('library:load', () => library.load())
 
-  handle('library:pick', async () => {
+  handle('library:pick', async (kind: unknown) => {
+    // macOS's panel can pick files and folders at once; elsewhere folders get their own dialog.
+    const folders = kind === 'folders'
     const opts: Electron.OpenDialogOptions = {
-      title: 'Import Stems',
+      title: folders ? 'Import Song Folders' : 'Import Songs',
       buttonLabel: 'Import',
-      properties: ['openFile', 'multiSelections'],
-      filters: [
-        { name: 'Audio', extensions: AUDIO_EXTENSIONS },
-        { name: 'All Files', extensions: ['*'] },
-      ],
+      properties: folders
+        ? ['openDirectory', 'multiSelections']
+        : ['openFile', 'multiSelections', ...(process.platform === 'darwin' ? (['openDirectory'] as const) : [])],
+      filters: folders
+        ? undefined
+        : [
+            { name: 'Songs (audio files, MultiTracks zips)', extensions: [...AUDIO_EXTENSIONS, 'zip'] },
+            { name: 'All Files', extensions: ['*'] },
+          ],
     }
     const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     return r.canceled ? [] : r.filePaths
   })
 
-  handle('library:create', async (paths: unknown) => {
+  handle('library:import', async (paths: unknown) => {
     if (!Array.isArray(paths) || !paths.every((p) => typeof p === 'string' && path.isAbsolute(p))) {
       throw new Error('Expected absolute file paths')
     }
-    // Only audio gets copied into the library; anything else is reported back as skipped.
-    const isAudio = (p: string) => AUDIO_EXTENSIONS.includes(path.extname(p).slice(1).toLowerCase())
-    const created = await library.createSong(paths.filter(isAudio))
-    for (const p of paths.filter((p) => !isAudio(p))) created.failed.push({ name: path.basename(p), reason: 'not an audio file' })
-    return created
+    return importPaths(library, paths, (p) => win?.webContents.send('library:import-progress', p))
   })
 
   handle('library:save', (rec: SongRecord) => library.saveSong(rec))

@@ -16,6 +16,7 @@ export interface Stem {
 export interface Song {
   id: string
   title: string
+  artist?: string
   key: string
   bpm: number
   /** [beats per bar, beat unit] */
@@ -29,6 +30,11 @@ export interface Song {
   /** Library stem files, kept while `stems` is unloaded so the song can be reloaded from disk. */
   stemFiles?: { id: string; name: string; file: string }[]
   artwork: string
+  /**
+   * The stem that is the click (a MultiTracks "Click Track"): it goes through the Click fader and
+   * routing instead of the generated click. Null or missing: the click is generated from the tempo.
+   */
+  clickStem?: string | null
   /** demo: synthesized; user: imported in a browser (memory only); library: saved on disk. */
   source: 'demo' | 'user' | 'library'
 }
@@ -91,6 +97,15 @@ export interface ChannelSettings {
 }
 
 export const KEYS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'] as const
+
+const SHARP_TO_FLAT: Record<string, string> = { 'C#': 'Db', 'D#': 'Eb', 'F#': 'Gb', 'G#': 'Ab', 'A#': 'Bb', Cb: 'B', Fb: 'E', 'E#': 'F', 'B#': 'C' }
+
+/** The key's root as one of KEYS (for the pad): "F#m" → "Gb", "Am" → "A". */
+export function keyRoot(key: string): (typeof KEYS)[number] {
+  const root = key.replace(/m(in(or)?)?$/i, '').trim()
+  const flat = SHARP_TO_FLAT[root] ?? root
+  return (KEYS as readonly string[]).includes(flat) ? (flat as (typeof KEYS)[number]) : 'C'
+}
 
 export function sectionEnd(song: Song, index: number): number {
   return index + 1 < song.sections.length ? song.sections[index + 1].start : song.duration

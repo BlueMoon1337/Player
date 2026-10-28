@@ -1,4 +1,6 @@
-import { type AudioInput, decodeAudio } from './decoder'
+import type { AbletonSong } from '../import/ableton'
+import { type SongName, isClickStem } from '../import/multitracks'
+import { type AudioInput, DECODERS, decodeAudio, mapLimit } from './decoder'
 import { songArtwork } from './synth'
 import { type Section, type Song, type Stem, uid } from './types'
 import type { WavMeta } from './wav'
@@ -33,7 +35,8 @@ export interface StemSource {
   name: string
   /** File name in the song's library folder, when the stem lives on disk (desktop). */
   file?: string
-  input: AudioInput
+  /** The bytes, or a function that produces them when it's this stem's turn (e.g. unzipping). */
+  input: AudioInput | (() => Promise<AudioInput>)
 }
 
 export function fileSource(f: File): StemSource {
@@ -60,7 +63,7 @@ interface Decoded {
   meta: WavMeta | null
 }
 
-function sectionsFromMarkers(meta: WavMeta, duration: number): Section[] {
+function sectionsFromMarkers(meta: { markers: { time: number; label: string }[] }, duration: number): Section[] {
   const out: Section[] = []
   for (const m of meta.markers) {
     if (m.time >= duration) continue
@@ -81,6 +84,8 @@ export async function importStems(
     songId?: string
     source?: Song['source']
     onProgress?: (done: number, total: number, name: string) => void
+    /** What's known from outside the audio: a MultiTracks name, its Ableton set, a cover picture URL. */
+    meta?: { name?: SongName; ableton?: AbletonSong | null; artwork?: string }
   } = {},
 ): Promise<ImportResult> {
   const audio = sources.filter((s) => isAudioName(s.name)).sort((a, b) => a.name.localeCompare(b.name))
@@ -90,18 +95,24 @@ export async function importStems(
   const skippedFiles = sources.filter((s) => !isAudioName(s.name) && s.file).map((s) => s.file!)
   if (audio.length === 0) throw new Error('No audio files found')
 
-  const decoded: Decoded[] = []
-  // One file at a time keeps peak memory down with long multi-channel stems.
-  for (const [i, src] of audio.entries()) {
-    opts.onProgress?.(i, audio.length, src.name)
+  // A few at a time: as fast as the decoders allow, without holding every file in memory at once.
+  let finished = 0
+  opts.onProgress?.(0, audio.length, audio[0].name)
+  const results = await mapLimit(audio, DECODERS, async (src) => {
     try {
-      const { buffer, meta } = await decodeAudio(ctx, src.input)
-      decoded.push({ source: src, buffer, meta })
+      const input = typeof src.input === 'function' ? await src.input() : src.input
+      const { buffer, meta } = await decodeAudio(ctx, input)
+      return { source: src, buffer, meta } as Decoded
     } catch (e) {
       skipped.push({ name: src.name, reason: (e as Error).message })
       if (src.file) skippedFiles.push(src.file)
+      return null
+    } finally {
+      finished++
+      if (finished < audio.length) opts.onProgress?.(finished, audio.length, audio[finished]?.name ?? src.name)
     }
-  }
+  })
+  const decoded = results.filter((d): d is Decoded => d !== null)
   if (decoded.length === 0) {
     throw new Error(skipped.map((s) => `${s.name}: ${s.reason}`).join('; '))
   }
@@ -126,26 +137,46 @@ export async function importStems(
   const timeSig = metas.find((m) => m.timeSig)?.timeSig ?? null
   const metaTitle = metas.find((m) => m.title)?.title ?? null
 
+  // What's known from outside the audio wins: a MultiTracks name (title, artist, key, BPM),
+  // then its Ableton set (sections, time signature), then what the WAV files carry.
+  const name = opts.meta?.name
+  const set = opts.meta?.ableton
+  const setMarkers = set?.markers.length ? set : null
+  const finalBpm = name?.bpm ?? set?.bpm ?? bpm ?? 120
+  const finalSig = set?.timeSig ?? timeSig ?? [4, 4]
+  const clickStem = stems.find((s) => isClickStem(s.name))
+
   const notes: string[] = []
-  if (markerSource) notes.push(`${markerSource.markers.length} section markers`)
-  if (bpm) notes.push(`${bpm} BPM`)
-  if (timeSig) notes.push(`${timeSig[0]}/${timeSig[1]}`)
+  if (name?.artist) notes.push(`title, artist, key and tempo from the name`)
+  if (setMarkers) notes.push(`${setMarkers.markers.length} sections from the Ableton set`)
+  else if (markerSource) notes.push(`${markerSource.markers.length} section markers`)
+  if (!name?.bpm && (set?.bpm || bpm)) notes.push(`${finalBpm} BPM`)
+  if (timeSig && !set?.timeSig) notes.push(`${timeSig[0]}/${timeSig[1]}`)
+  if (clickStem) notes.push(`its ${clickStem.name} as the click`)
 
   const title =
-    metaTitle || prefix.replace(/[\s_\-.]+$/, '') || (decoded.length === 1 ? names[0] : 'Imported Song')
+    (name?.artist ? name.title : null) ||
+    metaTitle ||
+    prefix.replace(/[\s_\-.]+$/, '') ||
+    name?.title ||
+    (decoded.length === 1 ? names[0] : 'Imported Song')
   const song: Song = {
     id: opts.songId ?? uid('song'),
     title,
-    key: 'C',
-    bpm: bpm ?? 120,
-    timeSig: timeSig ?? [4, 4],
+    artist: name?.artist,
+    key: name?.key ?? 'C',
+    bpm: finalBpm,
+    timeSig: finalSig,
     clickOffset: 0,
     duration,
-    sections: markerSource
-      ? sectionsFromMarkers(markerSource, duration)
-      : [{ id: uid('sec'), name: 'Song', start: 0 }],
+    sections: setMarkers
+      ? sectionsFromMarkers(setMarkers, duration)
+      : markerSource
+        ? sectionsFromMarkers(markerSource, duration)
+        : [{ id: uid('sec'), name: 'Song', start: 0 }],
     stems,
-    artwork: songArtwork(title),
+    clickStem: clickStem?.id ?? null,
+    artwork: opts.meta?.artwork ?? songArtwork(title),
     source: opts.source ?? 'user',
   }
   return { song, skipped, skippedFiles, notes }
