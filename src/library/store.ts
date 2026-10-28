@@ -238,9 +238,12 @@ export function songEnd(setlist: Setlist | undefined, songId: string): SongEndSe
   return { end: e?.end ?? 'cue', continuePad: e?.pad === true }
 }
 
-export function newSetlist(name: string, songs: string[] = []): string {
+/** A new setlist, made the current one unless `makeCurrent` is false. */
+export function newSetlist(name: string, songs: string[] = [], makeCurrent = true): string {
   const id = uid('setlist')
-  setlistStep(`New Setlist “${name}”`, () => set({ setlists: [...state.setlists, { id, name, songs }], currentSetlistId: id }))
+  setlistStep(`New Setlist “${name}”`, () =>
+    set({ setlists: [...state.setlists, { id, name, songs }], ...(makeCurrent ? { currentSetlistId: id } : {}) }),
+  )
   return id
 }
 

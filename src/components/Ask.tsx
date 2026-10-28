@@ -45,6 +45,12 @@ function ask(kind: Pending['kind'], options: PromptOptions): Promise<string | nu
 /** Asks a yes-or-no question; true for yes. */
 export const confirmDialog = (options: AskOptions) => ask('confirm', options).then((a) => a !== null)
 
+/** A delete asks twice: what goes, then "Are you sure?". */
+export async function confirmDelete(options: AskOptions, what: string): Promise<boolean> {
+  if (!(await confirmDialog({ confirmLabel: 'Delete', danger: true, ...options }))) return false
+  return confirmDialog({ title: 'Are you sure?', message: `${what} will be deleted.`, confirmLabel: 'Delete', danger: true })
+}
+
 /** Asks for a line of text; null when cancelled. */
 export const promptDialog = (options: PromptOptions) => ask('prompt', options)
 

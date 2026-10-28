@@ -5,7 +5,7 @@ import { type ImportedPad, PAD_SOUNDS, PadPlayer } from './audio/pad'
 import { computePeaks } from './audio/peaks'
 import { renderDemoStems } from './audio/synth'
 import { type Song, keyRoot, sectionIndexAt } from './audio/types'
-import { AskHost, ContextMenuHost, confirmDialog, isAsking } from './components/Ask'
+import { AskHost, ContextMenuHost, confirmDelete, isAsking } from './components/Ask'
 import { type LowerView, Mixer } from './components/Mixer'
 import { Menu, OutputsDialog, SongSettingsDialog } from './components/Panels'
 import { Setlist } from './components/Setlist'
@@ -213,12 +213,7 @@ export default function App() {
   }
 
   const deletePad = async (x: ImportedPad) => {
-    const ok = await confirmDialog({
-      title: `Delete the pad “${x.name}”?`,
-      message: 'Its WAV files go to the trash.',
-      confirmLabel: 'Delete',
-      danger: true,
-    })
+    const ok = await confirmDelete({ title: `Delete the pad “${x.name}”?`, message: 'Its WAV files go to the trash.' }, `The pad “${x.name}”`)
     if (!ok || !desktop) return
     try {
       await desktop.pads.delete(x.id)

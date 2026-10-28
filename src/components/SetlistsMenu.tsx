@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { type Song, formatTime } from '../audio/types'
+import { KEYS, type Song, formatTime, keyRoot } from '../audio/types'
 import { desktop } from '../platform'
 import {
   addToSetlist,
@@ -19,7 +19,7 @@ import {
   SONG_DRAG,
   useLibrary,
 } from '../library/store'
-import { type MenuEntry, confirmDialog, isAsking, promptDialog, showContextMenu } from './Ask'
+import { type MenuEntry, confirmDelete, isAsking, promptDialog, showContextMenu } from './Ask'
 
 interface Props {
   currentSongId: string | null
@@ -36,12 +36,7 @@ export async function confirmDeleteSong(song: Song, opts: { playingNow: boolean 
   if (lists.length) parts.push(`It comes out of ${lists.length === 1 ? 'the setlist' : 'the setlists'} ${listText(lists)}.`)
   if (opts.playingNow) parts.push('It’s playing now, so playback stops.')
   parts.push('You can undo this.')
-  const ok = await confirmDialog({
-    title: `Delete “${song.title}” from the library?`,
-    message: parts.join(' '),
-    confirmLabel: 'Delete',
-    danger: true,
-  })
+  const ok = await confirmDelete({ title: `Delete “${song.title}” from the library?`, message: parts.join(' ') }, `“${song.title}”`)
   if (ok) await deleteSong(song.id)
 }
 
@@ -50,12 +45,13 @@ export async function confirmDeleteSetlist(id: string) {
   const sl = getLibrary().setlists.find((s) => s.id === id)
   if (!sl) return
   if (sl.songs.length) {
-    const ok = await confirmDialog({
-      title: `Delete the setlist “${sl.name}”?`,
-      message: `Its ${sl.songs.length === 1 ? 'song stays' : `${sl.songs.length} songs stay`} in the library. You can undo this.`,
-      confirmLabel: 'Delete',
-      danger: true,
-    })
+    const ok = await confirmDelete(
+      {
+        title: `Delete the setlist “${sl.name}”?`,
+        message: `Its ${sl.songs.length === 1 ? 'song stays' : `${sl.songs.length} songs stay`} in the library. You can undo this.`,
+      },
+      `The setlist “${sl.name}”`,
+    )
     if (!ok) return
   }
   deleteSetlist(id)
@@ -69,6 +65,29 @@ export async function askNewSetlist() {
 async function askRename(id: string, name: string) {
   const next = await promptDialog({ title: 'Rename Setlist', defaultValue: name, confirmLabel: 'Rename' })
   if (next) renameSetlist(id, next)
+}
+
+type LibrarySort = 'title' | 'artist' | 'key'
+const SORT_KEY = 'player.librarySort'
+const loadSort = (): LibrarySort => {
+  try {
+    const s = localStorage.getItem(SORT_KEY)
+    return s === 'artist' || s === 'key' ? s : 'title'
+  } catch {
+    return 'title'
+  }
+}
+
+const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
+const byTitle = (a: Song, b: Song) => collator.compare(a.title, b.title)
+/** Library orders: by title; by artist (songs without one last), then title; by key (C, Db, D… minor after major), then title. */
+const SORTS: Record<LibrarySort, (a: Song, b: Song) => number> = {
+  title: byTitle,
+  artist: (a, b) => (!a.artist ? 1 : 0) - (!b.artist ? 1 : 0) || collator.compare(a.artist ?? '', b.artist ?? '') || byTitle(a, b),
+  key: (a, b) =>
+    KEYS.indexOf(keyRoot(a.key)) - KEYS.indexOf(keyRoot(b.key)) ||
+    Number(/m$/.test(a.key)) - Number(/m$/.test(b.key)) ||
+    byTitle(a, b),
 }
 
 const listText = (items: string[]) =>
@@ -87,10 +106,42 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
   const [dropOn, setDropOn] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  const all = useMemo(() => librarySongs(lib), [lib])
-  const shown = view === 'library'
-    ? all.filter((s) => s.title.toLowerCase().includes(query.trim().toLowerCase()))
-    : setlistSongs(current, lib)
+  const [sort, setSortState] = useState<LibrarySort>(loadSort)
+  const setSort = (s: LibrarySort) => {
+    setSortState(s)
+    try {
+      localStorage.setItem(SORT_KEY, s)
+    } catch {
+      /* storage unavailable */
+    }
+  }
+  const all = useMemo(() => librarySongs(lib).sort(SORTS[sort]), [lib, sort])
+  const q = query.trim().toLowerCase()
+  const shown =
+    view === 'library'
+      ? all.filter((s) => [s.title, s.artist, s.album].some((t) => t?.toLowerCase().includes(q)))
+      : setlistSongs(current, lib)
+
+  /** + Add: a menu of the setlists (✓ where the song is already), and a new one. */
+  const addMenu = (e: React.MouseEvent<HTMLButtonElement>, song: Song) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    showContextMenu({ clientX: r.left, clientY: r.bottom + 4, preventDefault() {} }, [
+      ...lib.setlists.map(
+        (sl): MenuEntry => ({
+          label: `${sl.songs.includes(song.id) ? '✓ ' : ''}${sl.name}${sl.id === current.id ? ' (current)' : ''}`,
+          onClick: () => addToSetlist(sl.id, [song.id]),
+        }),
+      ),
+      'separator',
+      {
+        label: 'New Setlist…',
+        onClick: async () => {
+          const name = await promptDialog({ title: 'New Setlist', placeholder: 'Sunday AM', confirmLabel: 'Create' })
+          if (name) newSetlist(name, [song.id], false)
+        },
+      },
+    ])
+  }
 
   // Selection follows the list it's in.
   useEffect(() => setSelected(null), [view, current?.id])
@@ -245,13 +296,23 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
           <header className="sl-head">
             <h3>{view === 'library' ? 'Library' : current.name}</h3>
             {view === 'library' ? (
-              <input
-                className="sl-search"
-                type="search"
-                placeholder="Search songs"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
+              <>
+                <input
+                  className="sl-search"
+                  type="search"
+                  placeholder="Search songs"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+                <div className="sl-sort" role="group" aria-label="Sort by">
+                  <span className="muted">Sort</span>
+                  {(['title', 'artist', 'key'] as const).map((s) => (
+                    <button key={s} className={sort === s ? 'on' : ''} aria-pressed={sort === s} onClick={() => setSort(s)}>
+                      {s[0].toUpperCase() + s.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </>
             ) : (
               <span className="muted sl-sub">
                 {shown.length} song{shown.length === 1 ? '' : 's'} ·{' '}
@@ -329,13 +390,15 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
                   {view === 'library' ? (
                     <button
                       className={`small sl-action ${inSetlist ? 'in' : ''}`}
-                      title={inSetlist ? `Already in “${current.name}” (add again)` : `Add to “${current.name}”`}
+                      title={inSetlist ? `In “${current.name}”; add it to a setlist` : 'Add it to a setlist'}
+                      aria-haspopup="menu"
                       onClick={(e) => {
                         e.stopPropagation()
-                        add(song.id)
+                        addMenu(e, song)
                       }}
                     >
                       {inSetlist ? '✓ Added' : '+ Add'}
+                      <span className="sl-caret">▾</span>
                     </button>
                   ) : (
                     <button

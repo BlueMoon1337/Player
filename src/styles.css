@@ -2502,3 +2502,34 @@ button.smap-btn:hover {
   bottom: 10px;
   left: 8px;
 }
+
+/* Library: sort buttons beside the search, and the ▾ on + Add (it opens a menu of setlists). */
+.sl-sort {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: #15171c;
+}
+.sl-sort .muted {
+  padding: 0 6px 0 8px;
+  font-size: 12px;
+}
+.sl-sort button {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #a1a1aa;
+  font-size: 13px;
+}
+.sl-sort button.on {
+  background: #2e3240;
+  color: #fff;
+}
+.sl-caret {
+  margin-left: 6px;
+  font-size: 10px;
+  opacity: 0.7;
+}
