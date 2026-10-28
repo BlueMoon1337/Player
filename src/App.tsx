@@ -885,8 +885,12 @@ export default function App() {
         </div>
       )}
       {notice && (
-        <div className={`toast ${notice.kind}`} onClick={() => setNotice(null)} role="status">
-          {notice.text}
+        // Gone as soon as it's pressed (not on release), so a click that moves a little still counts.
+        <div className={`toast ${notice.kind}`} onPointerDown={() => setNotice(null)} role="status" title="Click to close">
+          <span>{notice.text}</span>
+          <span className="toast-close" aria-label="Close">
+            ✕
+          </span>
         </div>
       )}
       {history.note && (

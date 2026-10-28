@@ -1076,6 +1076,20 @@ button.small {
   cursor: pointer;
   max-width: calc(100% - 32px);
 }
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.toast-close {
+  flex: none;
+  opacity: 0.6;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.toast:hover .toast-close {
+  opacity: 1;
+}
 .toast.info {
   background: #10263a;
   border-color: var(--accent);
