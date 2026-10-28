@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import type { LibraryData, LibraryState, SetlistRecord, SongEnd, SongRecord } from '../src/platform/types'
+import type { LibraryData, LibraryState, PadRecord, SetlistRecord, SongEnd, SongRecord } from '../src/platform/types'
 
 const SONG_ENDS: SongEnd[] = ['cue', 'stay', 'link', 'overlap', 'crossfade']
 
@@ -20,6 +20,10 @@ export function assertFileName(name: unknown): asserts name is string {
 
 export function newSongId() {
   return `song-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`
+}
+
+export function newPadId() {
+  return `pad-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`
 }
 
 /** A file name that's safe on every OS and not yet used in this song folder (case-insensitively). */
@@ -94,6 +98,47 @@ export class Library {
   songDir(id: string) {
     assertId(id)
     return path.join(this.songsDir, id)
+  }
+
+  private get padsDir() {
+    return path.join(this.root, 'Pads')
+  }
+
+  /** <root>/Pads/<id>/: an imported pad's WAVs and its pad.json. */
+  padDir(id: string) {
+    assertId(id)
+    return path.join(this.padsDir, id)
+  }
+
+  /** Absolute path of a pad's WAV, guaranteed to be inside the pad's folder. */
+  padPath(id: string, file: string) {
+    assertFileName(file)
+    return path.join(this.padDir(id), file)
+  }
+
+  async listPads(): Promise<PadRecord[]> {
+    const pads: PadRecord[] = []
+    let entries: import('node:fs').Dirent[] = []
+    try {
+      entries = await fs.readdir(this.padsDir, { withFileTypes: true })
+    } catch {
+      return pads
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !ID_RE.test(entry.name)) continue
+      try {
+        const rec = JSON.parse(await fs.readFile(path.join(this.padsDir, entry.name, 'pad.json'), 'utf8'))
+        if (rec?.version === 1 && rec.id === entry.name && Array.isArray(rec.files) && rec.files.length) pads.push(rec)
+      } catch {
+        // An unfinished import: skip it.
+      }
+    }
+    return pads.sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  async savePad(rec: PadRecord) {
+    for (const f of rec.files) assertFileName(f.file)
+    await writeJsonAtomic(path.join(this.padDir(rec.id), 'pad.json'), rec)
   }
 
   /** Absolute path of a stem, guaranteed to be inside the song's folder. */

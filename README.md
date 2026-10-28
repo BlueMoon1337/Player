@@ -53,7 +53,9 @@ A multitrack backing-track player for live worship and band use, in the spirit o
 - **Side buttons.**
   - The **mixer** button shows the channel strips.
   - **Buses** groups the stems by name ("EG 1" and "EG 2" go under **EG**), with a fader, mute and solo for each bus. The **›** beside a bus shows its tracks. Right-click a bus to send all its tracks to one output.
-  - **Pad Player** shows the pad: its fader, a choice of three pad sounds, **LINK** (follow the loaded song's key), and the twelve keys. Click a key to play the pad in it; click the lit key to stop.
+  - **Pad Player** shows the pad: its fader, the pad sound, **IMPORT**, and the twelve keys. Click a key to play the pad in it; click the lit key to stop.
+    - **IMPORT** brings in pads as zips of WAV files (each zip is one pad; WAV files chosen together work too). The key each WAV plays comes from its name, e.g. `Ambient Pad - Db.wav` or `Pad_F#.wav`. A key without its own file plays the nearest one, pitched. Each pass of the loop crossfades into the next, which starts a few seconds in, past the fade-in pads often have. On desktop, imported pads are kept in the library's `Pads` folder; in the web version they last for the session.
+    - The **›** on the sound card chooses between the three built-in sounds and the imported pads, turns **Follow Song Key** on or off, and deletes an imported pad.
   - **Mute MIDI** silences the MIDI messages the app sends (start, stop, continue, and a program change on each song change). It turns red while on.
   - **Repeat once** (the partial loop) plays the section under the playhead one more time, then carries on.
   - **Repeat until turned off** (∞) loops that section until you turn it off.

@@ -22,6 +22,7 @@ import type { LibraryState, MenuCommand, MenuState, SongRecord } from '../src/pl
 import { Library, assertFileName, assertId } from './library'
 import * as updates from './updates'
 import { AUDIO_EXTENSIONS, importPaths } from './importer'
+import { importPads } from './pads'
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL
 const RENDERER_DIR = path.join(__dirname, '..', 'dist')
@@ -77,7 +78,10 @@ function libraryRoot() {
 
 // ------------------------------------------------------------------ protocol
 
-/** Serves the built UI (app://player/...) and library stems (app://player/media/<song>/<file>). */
+/**
+ * Serves the built UI (app://player/...), library stems (app://player/media/<song>/<file>) and
+ * imported pads (app://player/pads/<pad>/<file>).
+ */
 function registerAppProtocol() {
   protocol.handle('app', async (req) => {
     const url = new URL(req.url)
@@ -85,10 +89,10 @@ function registerAppProtocol() {
     const headers: Record<string, string> = {}
     let file: string
     const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
-    if (parts[0] === 'media') {
+    if (parts[0] === 'media' || parts[0] === 'pads') {
       try {
         if (parts.length !== 3) throw new Error('bad path')
-        file = library.stemPath(parts[1], parts[2])
+        file = parts[0] === 'media' ? library.stemPath(parts[1], parts[2]) : library.padPath(parts[1], parts[2])
       } catch {
         return new Response('Forbidden', { status: 403 })
       }
@@ -404,6 +408,33 @@ function registerIpc() {
   })
 
   handle('library:save', (rec: SongRecord) => library.saveSong(rec))
+
+  handle('pads:list', () => library.listPads())
+  handle('pads:import', async () => {
+    const opts: Electron.OpenDialogOptions = {
+      title: 'Import Pads',
+      buttonLabel: 'Import',
+      message: 'Choose pad zips (each is one pad), or WAV files',
+      properties: ['openFile', 'multiSelections', ...(process.platform === 'darwin' ? (['openDirectory'] as const) : [])],
+      filters: [
+        { name: 'Pads (zips of WAV files, or WAV files)', extensions: ['zip', 'wav', 'wave', 'aif', 'aiff'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    }
+    const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    if (r.canceled || !r.filePaths.length) return { pads: [], failed: [] }
+    return importPads(library, r.filePaths)
+  })
+  handle('pads:delete', async (id: unknown) => {
+    const dir = library.padDir(id as string)
+    // To the system trash; where that isn't available (or doesn't answer), deleted outright.
+    const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timed out')), 5000))
+    try {
+      await Promise.race([shell.trashItem(dir), timeout])
+    } catch {
+      await fsp.rm(dir, { recursive: true, force: true })
+    }
+  })
 
   handle('library:remove-files', (id: unknown, files: unknown) => {
     assertId(id)

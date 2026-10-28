@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Engine, type JumpMode, type LoopMode } from './audio/engine'
 import { type ImportResult, fileSource, importStems, isAudioFile } from './audio/importer'
-import { PadPlayer } from './audio/pad'
+import { type ImportedPad, PAD_SOUNDS, PadPlayer } from './audio/pad'
 import { computePeaks } from './audio/peaks'
 import { renderDemoStems } from './audio/synth'
 import { type Song, keyRoot, sectionIndexAt } from './audio/types'
-import { AskHost, ContextMenuHost, isAsking } from './components/Ask'
+import { AskHost, ContextMenuHost, confirmDialog, isAsking } from './components/Ask'
 import { type LowerView, Mixer } from './components/Mixer'
 import { Menu, OutputsDialog, SongSettingsDialog } from './components/Panels'
 import { Setlist } from './components/Setlist'
@@ -31,9 +31,10 @@ import {
   useLibrary,
 } from './library/store'
 import { type MenuCommand, desktop } from './platform'
-import type { SongEndSetting } from './platform/types'
+import { type PadRecord, type SongEndSetting, padUrl } from './platform/types'
 import { type LibraryImport, importIntoLibrary, loadSongStems, recordFromSong } from './platform/library'
-import { readZipSong } from './import/webZip'
+import { PAD_FILE, keyFromFileName, padNameFromFiles } from './import/pads'
+import { readZipPad, readZipSong } from './import/webZip'
 import { checkForUpdates, startUpdateChecks, useUpdates } from './platform/updates'
 
 // One audio graph for the lifetime of the page.
@@ -42,8 +43,15 @@ const pad = new PadPlayer(engine.ctx)
 
 const SETTINGS_KEY = 'player.settings.v1'
 
-function loadSettings(): { jumpMode: JumpMode; fadeSeconds: number; link: boolean } {
-  const defaults = { jumpMode: 'bar' as JumpMode, fadeSeconds: 4, link: false }
+/** A pad saved in the library folder, read from there when it plays. */
+const padFromRecord = (r: PadRecord): ImportedPad => ({
+  id: r.id,
+  name: r.name,
+  files: r.files.map((f) => ({ key: f.key, name: f.file, input: padUrl(r.id, f.file) })),
+})
+
+function loadSettings(): { jumpMode: JumpMode; fadeSeconds: number; link: boolean; padSound: string } {
+  const defaults = { jumpMode: 'bar' as JumpMode, fadeSeconds: 4, link: false, padSound: 'warm' }
   try {
     return { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }
   } catch {
@@ -108,6 +116,9 @@ export default function App() {
   const [jumpMode, setJumpMode] = useState<JumpMode>(initial.jumpMode)
   const [fadeSeconds, setFadeSeconds] = useState(initial.fadeSeconds)
   const [link, setLink] = useState(initial.link)
+  const [padSound, setPadSoundState] = useState(initial.padSound)
+  const [importedPads, setImportedPads] = useState<ImportedPad[]>([])
+  const padPicker = useRef<HTMLInputElement>(null)
   const peaks = useRef(new Map<string, Float32Array>())
   const saveTimers = useRef(new Map<string, number>())
 
@@ -115,11 +126,108 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ jumpMode, fadeSeconds, link }))
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ jumpMode, fadeSeconds, link, padSound }))
     } catch {
       /* storage unavailable */
     }
-  }, [jumpMode, fadeSeconds, link])
+  }, [jumpMode, fadeSeconds, link, padSound])
+
+  const setPadSound = (id: string) => {
+    setPadSoundState(id)
+    pad.setSound(id)
+  }
+
+  // Imported pads: on desktop, the ones saved in the library folder. The saved choice of sound
+  // applies once they're known (it may be one of them).
+  useEffect(() => {
+    pad.onError = (text) => setNotice({ kind: 'warn', text })
+    const apply = (pads: ImportedPad[]) => {
+      pad.setImported(pads)
+      setImportedPads(pads)
+      const known = pads.some((x) => x.id === initial.padSound) || PAD_SOUNDS.some((s) => s.id === initial.padSound)
+      setPadSound(known ? initial.padSound : PAD_SOUNDS[0].id)
+    }
+    if (!desktop) return apply([])
+    desktop.pads
+      .list()
+      .then((recs) => apply(recs.map(padFromRecord)))
+      .catch(() => apply([]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /** Adds imported pads, picks the first, and says what came in (and what didn't). */
+  const addPads = (pads: ImportedPad[], failed: { name: string; reason: string }[]) => {
+    if (pads.length) {
+      const all = [...importedPads, ...pads].sort((a, b) => a.name.localeCompare(b.name))
+      pad.setImported(all)
+      setImportedPads(all)
+      setPadSound(pads[0].id)
+    }
+    const keys = (x: ImportedPad) => new Set(x.files.map((f) => f.key ?? 'C')).size
+    let text = pads.length
+      ? `Imported ${pads.map((x) => `“${x.name}” (${keys(x)} of 12 keys${keys(x) < 12 ? '; the rest are pitched from the nearest' : ''})`).join(', ')}`
+      : 'No pads imported'
+    if (failed.length) text += `. Skipped ${failed.map((f) => `${f.name} (${f.reason})`).join(', ')}`
+    setNotice({ kind: failed.length || !pads.length ? 'warn' : 'info', text })
+  }
+
+  /** IMPORT in the Pad Player: zips of WAVs (each one pad), or WAV files (together one pad). */
+  const importPads = async () => {
+    if (!desktop) return padPicker.current?.click()
+    try {
+      setLoading('Importing pads…')
+      const { pads, failed } = await desktop.pads.import()
+      if (pads.length || failed.length) addPads(pads.map(padFromRecord), failed)
+    } catch (e) {
+      setNotice({ kind: 'error', text: `Couldn't import pads: ${(e as Error).message}` })
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  /** The web version: pads read from the chosen files, for this session only. */
+  const importPadFiles = async (files: File[]) => {
+    const pads: ImportedPad[] = []
+    const failed: { name: string; reason: string }[] = []
+    const id = () => `web-pad-${Date.now().toString(36)}-${pads.length}`
+    for (const f of files.filter((f) => /\.zip$/i.test(f.name))) {
+      try {
+        const z = await readZipPad(f)
+        pads.push({ id: id(), name: z.name, files: z.files })
+      } catch (e) {
+        failed.push({ name: f.name, reason: (e as Error).message })
+      }
+    }
+    const wavs = files.filter((f) => PAD_FILE.test(f.name))
+    if (wavs.length) {
+      pads.push({
+        id: id(),
+        name: padNameFromFiles(wavs.map((f) => f.name)),
+        files: wavs.map((f) => ({ key: keyFromFileName(f.name), name: f.name, input: f })),
+      })
+    }
+    for (const f of files) if (!/\.zip$/i.test(f.name) && !PAD_FILE.test(f.name)) failed.push({ name: f.name, reason: 'not a zip or WAV file' })
+    addPads(pads, failed)
+  }
+
+  const deletePad = async (x: ImportedPad) => {
+    const ok = await confirmDialog({
+      title: `Delete the pad “${x.name}”?`,
+      message: 'Its WAV files go to the trash.',
+      confirmLabel: 'Delete',
+      danger: true,
+    })
+    if (!ok || !desktop) return
+    try {
+      await desktop.pads.delete(x.id)
+      const rest = importedPads.filter((p) => p.id !== x.id)
+      pad.setImported(rest)
+      setImportedPads(rest)
+      if (padSound === x.id) setPadSound(PAD_SOUNDS[0].id)
+    } catch (e) {
+      setNotice({ kind: 'error', text: `Couldn't delete the pad: ${(e as Error).message}` })
+    }
+  }
 
   useEffect(() => {
     engine.fadeSeconds = fadeSeconds
@@ -628,6 +736,11 @@ export default function App() {
             if (v && song) setPadKey(keyRoot(song.key))
           }}
           onOutputs={() => setOutputsOpen(true)}
+          padSound={padSound}
+          setPadSound={setPadSound}
+          importedPads={importedPads}
+          onImportPads={() => void importPads()}
+          onDeletePad={desktop ? (x) => void deletePad(x) : undefined}
         />
       </div>
       {outputsOpen && <OutputsDialog engine={engine} state={state} onClose={() => setOutputsOpen(false)} />}
@@ -696,6 +809,19 @@ export default function App() {
         />
       )}
       {updateOpen && <UpdateDialog playing={state.playing} onClose={() => setUpdateOpen(false)} />}
+      {/* The web version's picker for pad zips (IMPORT in the Pad Player). */}
+      <input
+        ref={padPicker}
+        type="file"
+        accept=".zip,application/zip,.wav,.wave,.aif,.aiff,audio/wav"
+        multiple
+        hidden
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])]
+          e.target.value = ''
+          if (files.length) void importPadFiles(files)
+        }}
+      />
       {/* The web version's file picker, for Import in the Setlists menu. */}
       <input
         ref={webPicker}

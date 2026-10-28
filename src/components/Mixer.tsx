@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { type Engine, type EngineState, type GroupSettings, type LoopMode, faderToDb } from '../audio/engine'
-import { PAD_SOUNDS, type PadPlayer, type PadSoundId } from '../audio/pad'
+import { PAD_SOUNDS, type ImportedPad, type PadPlayer } from '../audio/pad'
 import { type Bus, type ChannelSettings, type Song, busLabel, busOptions, sectionIndexAt } from '../audio/types'
 import { type MenuEntry, showContextMenu } from './Ask'
 import { Fader } from './Fader'
@@ -20,9 +20,17 @@ interface Props {
   padKey: string
   /** Picks a key by hand (which unlinks the pad from the song) and starts the pad. */
   playPadKey: (k: string) => void
-  /** LINK: the pad follows the loaded song's key. */
+  /** The pad follows the loaded song's key (in the sound menu). */
   padFollow: boolean
   setPadFollow: (v: boolean) => void
+  /** The chosen pad sound: a built-in one's id, or an imported pad's. */
+  padSound: string
+  setPadSound: (id: string) => void
+  importedPads: ImportedPad[]
+  /** IMPORT: pads from zips of WAV files. */
+  onImportPads: () => void
+  /** Desktop: deletes an imported pad (asking first). */
+  onDeletePad?: (pad: ImportedPad) => void
   onOutputs: () => void
 }
 
@@ -127,7 +135,6 @@ export function Mixer(p: Props) {
   const [clickOpen, setClickOpen] = useState(false)
   const [openBuses, setOpenBuses] = useState<Set<string>>(new Set())
   const [padVolume, setPadVolume] = useState(pad.volume)
-  const [padSound, setPadSound] = useState<PadSoundId>(pad.sound)
 
   const routeMenu = (current: Bus, apply: (b: Bus) => void): MenuEntry[] => {
     const options = busOptions(state.outputCount)
@@ -184,7 +191,30 @@ export function Mixer(p: Props) {
 
   let main: JSX.Element
   if (view === 'pad') {
-    const sound = PAD_SOUNDS.find((s) => s.id === padSound) ?? PAD_SOUNDS[0]
+    const builtIn = PAD_SOUNDS.find((s) => s.id === p.padSound)
+    const imported = p.importedPads.find((x) => x.id === p.padSound)
+    const sound = imported
+      ? {
+          name: imported.name,
+          by: `Imported · ${new Set(imported.files.map((f) => f.key ?? 'C')).size} of 12 keys`,
+          hue: [...imported.name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7),
+        }
+      : { name: (builtIn ?? PAD_SOUNDS[0]).name, by: 'Player', hue: (builtIn ?? PAD_SOUNDS[0]).hue }
+    const soundMenu = (): MenuEntry[] => {
+      const item = (id: string, name: string): MenuEntry => ({
+        label: `${id === p.padSound ? '✓ ' : ''}${name}`,
+        onClick: () => p.setPadSound(id),
+      })
+      const entries: MenuEntry[] = PAD_SOUNDS.map((s) => item(s.id, s.name))
+      if (p.importedPads.length) entries.push('separator', ...p.importedPads.map((x) => item(x.id, x.name)))
+      entries.push(
+        'separator',
+        { label: `${p.padFollow ? '✓ ' : ''}Follow Song Key`, onClick: () => p.setPadFollow(!p.padFollow) },
+        { label: 'Import Pads…', onClick: p.onImportPads },
+      )
+      if (imported && p.onDeletePad) entries.push({ label: `Delete “${imported.name}”…`, danger: true, onClick: () => p.onDeletePad!(imported) })
+      return entries
+    }
     main = (
       <div className="mixer-strips pad-view">
         <div className="strip-group">
@@ -214,34 +244,23 @@ export function Mixer(p: Props) {
               title="Choose the pad sound"
               onClick={(e) => {
                 const r = e.currentTarget.getBoundingClientRect()
-                showContextMenu(
-                  { clientX: r.right - 220, clientY: r.bottom + 4, preventDefault() {} },
-                  PAD_SOUNDS.map((s) => ({
-                    label: `${s.id === padSound ? '✓ ' : ''}${s.name}`,
-                    onClick: () => {
-                      setPadSound(s.id)
-                      pad.setSound(s.id)
-                    },
-                  })),
-                )
+                showContextMenu({ clientX: r.right - 240, clientY: r.bottom + 4, preventDefault() {} }, soundMenu())
               }}
             >
               <span className="pad-art" style={{ ['--h' as string]: sound.hue }} />
               <span className="pad-sound-text">
                 <b>{sound.name}</b>
-                <span>Player</span>
+                <span>
+                  {sound.by}
+                  {p.padFollow ? ' · follows the song’s key' : ''}
+                </span>
               </span>
               <svg className="pad-chevron" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M9 5l7 7-7 7" />
               </svg>
             </button>
-            <button
-              className={`pad-link ${p.padFollow ? 'on' : ''}`}
-              onClick={() => p.setPadFollow(!p.padFollow)}
-              title={p.padFollow ? 'The pad follows the song’s key (click to unlink)' : 'Link the pad to the song’s key'}
-              aria-pressed={p.padFollow}
-            >
-              LINK
+            <button className="pad-import" onClick={p.onImportPads} title="Import pads: zips of WAV files, one per key">
+              IMPORT
             </button>
           </div>
           <div className="pad-keys">

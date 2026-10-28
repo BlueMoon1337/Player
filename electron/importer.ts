@@ -53,25 +53,55 @@ async function newSongFolder(lib: Library) {
 
 // ---------------------------------------------------------------------- zip
 
+/**
+ * A zip on disk, open: its entries, and extracting one to a file (streamed, and checked against
+ * its CRC-32 so a damaged download is caught). Close it when done.
+ */
+export async function openZip(zipPath: string) {
+  const fh = await fs.open(zipPath, 'r')
+  const { size } = await fh.stat()
+  const src: ZipSource = {
+    size,
+    read: async (offset, length) => {
+      const buf = Buffer.alloc(length)
+      const { bytesRead } = await fh.read(buf, 0, length, offset)
+      return buf.subarray(0, bytesRead)
+    },
+  }
+  let entries: ZipEntry[]
+  try {
+    entries = await listZip(src)
+  } catch (e) {
+    await fh.close()
+    throw new Error(`can't read the zip: ${(e as Error).message}`)
+  }
+  const extract = async (entry: ZipEntry, dest: string, onBytes: (n: number) => void = () => {}) => {
+    checkSupported(entry)
+    if (entry.size === 0) throw new Error('empty file')
+    const start = await dataStart(src, entry)
+    const m = meter(onBytes)
+    const raw = createReadStream(zipPath, { start, end: start + entry.compressedSize - 1, highWaterMark: 1 << 20 })
+    const out = createWriteStream(dest)
+    try {
+      if (entry.method === 8) await pipeline(raw, zlib.createInflateRaw(), m.stream, out)
+      else await pipeline(raw, m.stream, out)
+    } catch (e) {
+      await fs.rm(dest, { force: true })
+      throw new Error(`couldn't unzip it (${(e as Error).message})`)
+    }
+    if (m.state.bytes !== entry.size || m.state.crc >>> 0 !== entry.crc32 >>> 0) {
+      await fs.rm(dest, { force: true })
+      throw new Error('it is damaged in the zip (checksum mismatch)')
+    }
+  }
+  return { src, entries, extract, close: () => fh.close() }
+}
+
 async function importZip(lib: Library, zipPath: string, report: Report): Promise<CreatedSong> {
   const sourceName = path.basename(zipPath).replace(/\.zip$/i, '')
-  const fh = await fs.open(zipPath, 'r')
+  const zip = await openZip(zipPath)
+  const { src, entries } = zip
   try {
-    const { size } = await fh.stat()
-    const src: ZipSource = {
-      size,
-      read: async (offset, length) => {
-        const buf = Buffer.alloc(length)
-        const { bytesRead } = await fh.read(buf, 0, length, offset)
-        return buf.subarray(0, bytesRead)
-      },
-    }
-    let entries: ZipEntry[]
-    try {
-      entries = await listZip(src)
-    } catch (e) {
-      throw new Error(`can't read the zip: ${(e as Error).message}`)
-    }
     const byName = new Map(entries.map((e) => [e.name, e]))
     const picked = pickFiles(entries.map((e) => e.name))
     if (!picked.stems.length) throw new Error('there are no audio files in the zip')
@@ -83,28 +113,11 @@ async function importZip(lib: Library, zipPath: string, report: Report): Promise
     const total = [...stems, ...(art ? [art] : [])].reduce((t, e) => t + e.size, 0)
     let done = 0
 
-    const extract = async (entry: ZipEntry, dest: string) => {
-      checkSupported(entry)
-      if (entry.size === 0) throw new Error('empty file')
-      const start = await dataStart(src, entry)
-      const m = meter((n) => {
+    const extract = (entry: ZipEntry, dest: string) =>
+      zip.extract(entry, dest, (n) => {
         done += n
         report(done, total, baseName(entry.name))
       })
-      const raw = createReadStream(zipPath, { start, end: start + entry.compressedSize - 1, highWaterMark: 1 << 20 })
-      const out = createWriteStream(dest)
-      try {
-        if (entry.method === 8) await pipeline(raw, zlib.createInflateRaw(), m.stream, out)
-        else await pipeline(raw, m.stream, out)
-      } catch (e) {
-        await fs.rm(dest, { force: true })
-        throw new Error(`couldn't unzip it (${(e as Error).message})`)
-      }
-      if (m.state.bytes !== entry.size || m.state.crc >>> 0 !== entry.crc32 >>> 0) {
-        await fs.rm(dest, { force: true })
-        throw new Error('it is damaged in the zip (checksum mismatch)')
-      }
-    }
 
     const files: CreatedSong['files'] = []
     const failed: CreatedSong['failed'] = []
@@ -143,7 +156,7 @@ async function importZip(lib: Library, zipPath: string, report: Report): Promise
     }
     return { songId, sourceName, files, failed, artwork, ableton }
   } finally {
-    await fh.close()
+    await zip.close()
   }
 }
 

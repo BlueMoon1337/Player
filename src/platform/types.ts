@@ -25,6 +25,15 @@ export interface SongRecord {
   clickStem?: string | null
 }
 
+/** An imported pad, as saved in `<library>/Pads/<id>/pad.json` next to its WAVs. */
+export interface PadRecord {
+  version: 1
+  id: string
+  name: string
+  /** Each WAV and the key its name says it plays (null: none, treated as C). */
+  files: { key: string | null; file: string }[]
+}
+
 /**
  * What happens when a song in a setlist ends (as in Playback):
  *   cue        the next song is loaded, ready to play (after the last song: the first one)
@@ -158,6 +167,13 @@ export interface DesktopAPI {
     /** Opens the library folder, or a song's folder, in the file manager. */
     reveal(songId?: string): Promise<void>
   }
+  pads: {
+    list(): Promise<PadRecord[]>
+    /** Asks for pad zips (or WAVs) and imports them; each zip is one pad. */
+    import(): Promise<{ pads: PadRecord[]; failed: { name: string; reason: string }[] }>
+    /** Moves an imported pad's folder to the system trash. */
+    delete(padId: string): Promise<void>
+  }
   /** Absolute path of a dropped file ('' if it has none, e.g. dragged from a browser). */
   pathForFile(file: File): string
   /** Tells the app audio is running: keeps the display awake and guards against quitting. */
@@ -174,6 +190,11 @@ export interface DesktopAPI {
     onProgress(cb: (p: { received: number; total: number | null }) => void): () => void
   }
   onMenu(cb: (cmd: MenuCommand) => void): () => void
+}
+
+/** URL the renderer fetches an imported pad's WAV from (served by the main process). */
+export function padUrl(padId: string, file: string): string {
+  return `app://player/pads/${encodeURIComponent(padId)}/${encodeURIComponent(file)}`
 }
 
 /** URL the renderer fetches a library stem from (served by the main process). */

@@ -968,19 +968,19 @@ button.small {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.pad-link {
+.pad-import {
   flex: none;
   width: 140px;
   border: none;
   border-radius: 6px;
   background: #262628;
-  color: #77777d;
+  color: #c4c4ca;
   font-size: 16px;
   font-weight: 500;
   letter-spacing: 0.04em;
 }
-.pad-link.on {
-  color: #22c55e;
+.pad-import:hover {
+  color: #fff;
 }
 .pad-keys {
   display: grid;

@@ -21,6 +21,11 @@ const api: DesktopAPI = {
     saveState: (state) => ipcRenderer.invoke('library:save-state', state),
     reveal: (songId) => ipcRenderer.invoke('library:reveal', songId),
   },
+  pads: {
+    list: () => ipcRenderer.invoke('pads:list'),
+    import: () => ipcRenderer.invoke('pads:import'),
+    delete: (padId) => ipcRenderer.invoke('pads:delete', padId),
+  },
   pathForFile: (file) => webUtils.getPathForFile(file),
   setActive: (active) => ipcRenderer.send('app:active', active),
   setMenuState: (state) => ipcRenderer.send('app:menu-state', state),

@@ -4,7 +4,8 @@
  */
 import type { StemSource } from '../audio/importer'
 import { type AbletonSong, parseAbleton } from './ableton'
-import { type SongName, parseSongName, pickFiles } from './multitracks'
+import { type SongName, isJunk, parseSongName, pickFiles } from './multitracks'
+import { PAD_FILE, keyFromFileName, padNameFromFiles } from './pads'
 import { type ZipEntry, type ZipSource, baseName, checkSupported, crc32, dataStart, listZip } from './zip'
 
 export interface WebZipSong {
@@ -79,4 +80,24 @@ export async function readZipSong(file: File): Promise<WebZipSong> {
     }
   }
   return { name: parseSongName(file.name), sources, artwork, ableton, failed }
+}
+
+export interface WebPadFile {
+  key: string | null
+  name: string
+  /** Inflated (and checked) when the pad first plays this file. */
+  input: () => Promise<Blob>
+}
+
+/** A pad zip in the web version: its WAVs, each with the key its name gives. */
+export async function readZipPad(file: File): Promise<{ name: string; files: WebPadFile[] }> {
+  const src = blobSource(file)
+  const entries = (await listZip(src)).filter((e) => PAD_FILE.test(e.name) && !isJunk(e.name))
+  if (!entries.length) throw new Error('there are no WAV files in the zip')
+  entries.sort((a, b) => a.name.localeCompare(b.name))
+  const name = file.name.replace(/\.zip$/i, '').replace(/[\s_-]+/g, ' ').trim() || padNameFromFiles(entries.map((e) => e.name))
+  return {
+    name,
+    files: entries.map((e) => ({ key: keyFromFileName(e.name), name: baseName(e.name), input: () => entryBlob(file, src, e) })),
+  }
 }
