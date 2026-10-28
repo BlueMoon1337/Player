@@ -17,6 +17,9 @@ export interface Song {
   id: string
   title: string
   artist?: string
+  album?: string
+  /** When it was imported (ms since 1970), for the library's Recent list. */
+  added?: number
   key: string
   bpm: number
   /** [beats per bar, beat unit] */

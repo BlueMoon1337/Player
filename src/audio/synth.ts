@@ -172,6 +172,8 @@ export function demoSongs(): Song[] {
     return {
       id: `demo-${i}`,
       title: d.title,
+      artist: 'Player',
+      album: 'Demo Songs',
       key: d.key,
       bpm: d.bpm,
       timeSig: [4, 4] as [number, number],

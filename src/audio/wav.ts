@@ -4,7 +4,7 @@
  * Decodes PCM 8/16/24/32-bit, IEEE float 32/64-bit, A-law and µ-law, including
  * WAVE_FORMAT_EXTENSIBLE files, at the file's native sample rate. Also reads the
  * metadata DAWs embed in exported stems: cue markers with labels (cue + LIST/adtl),
- * tempo and meter (acid) and the title (LIST/INFO/INAM).
+ * tempo and meter (acid), and the title, artist and album (LIST/INFO INAM, IART, IPRD).
  */
 
 export interface WavMarker {
@@ -17,6 +17,8 @@ export interface WavMeta {
   bpm: number | null
   timeSig: [number, number] | null
   title: string | null
+  artist: string | null
+  album: string | null
 }
 
 export interface WavFile {
@@ -91,6 +93,8 @@ export function readWav(ab: ArrayBuffer): WavFile | null {
   let bpm: number | null = null
   let timeSig: [number, number] | null = null
   let title: string | null = null
+  let artist: string | null = null
+  let album: string | null = null
   const text = new TextDecoder('utf-8')
   const str = (from: number, to: number) => {
     let end = from
@@ -139,6 +143,10 @@ export function readWav(ab: ArrayBuffer): WavFile | null {
           labels.set(dv.getUint32(sbody, true), str(sbody + 4, Math.min(end, sbody + ssize)))
         } else if (listType === 'INFO' && sid === 'INAM') {
           title = str(sbody, Math.min(end, sbody + ssize)) || null
+        } else if (listType === 'INFO' && sid === 'IART') {
+          artist = str(sbody, Math.min(end, sbody + ssize)) || null
+        } else if (listType === 'INFO' && sid === 'IPRD') {
+          album = str(sbody, Math.min(end, sbody + ssize)) || null
         }
         o = sbody + ssize + (ssize & 1)
       }
@@ -163,7 +171,7 @@ export function readWav(ab: ArrayBuffer): WavFile | null {
     .map(([cueId, frame], i) => ({ time: frame / sampleRate, label: labels.get(cueId) || `Marker ${i + 1}` }))
     .filter((m) => m.time < frames / sampleRate)
     .sort((a, b) => a.time - b.time)
-  const meta: WavMeta = { markers, bpm, timeSig, title }
+  const meta: WavMeta = { markers, bpm, timeSig, title, artist, album }
 
   let encoding: string
   let read: ((o: number) => number) | null = null

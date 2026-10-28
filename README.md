@@ -27,10 +27,23 @@ A multitrack backing-track player for live worship and band use, in the spirit o
   - **Time display:** where the song is now, large, with its start / end points underneath.
   - **PAD**, which turns the ambient pad on and off.
   - **Back To Start**, **Play / Pause**, and **Fade**. Fade brings the tracks in from a stop, fades them out while playing, and turns a fade-out back up if pressed again. Its length is set in Settings.
-  - **EDIT.** Click to turn editing on or off; press and hold (or right-click) to choose **Song** (sections, tempo, key, click) or **Setlist** (reorder and remove songs).
+  - **EDIT / DONE.** Click to turn on edit mode (Playback's **Setlist / Song Map**); press and hold (or right-click) for **Song Settings…** (title, artist, album, key, tempo, click).
   - **Setlists Menu**, then the **More Menu** (≡) for settings, updates and the library folder.
 
   The current setlist's name is shown above the buttons.
+- **Edit mode (Setlist / Song Map).**
+  - **Setlist:** big cards with **−** (out of the setlist), **•••** (load, Song Settings, move, delete), and **+** between cards to add a song there, or **Add a Song** at the end.
+  - **End of song:** the button at each card's corner says what happens when the song ends, as in Playback:
+    - **Cue Next Song** (the default) loads the next song, ready to play. After the last song it's **Cue First Song**.
+    - **Stay In Song** leaves the song loaded at its end.
+    - **AutoLink** starts the next song straight away.
+    - **Overlap** starts the next song when this one's last section begins, and lets that section play out underneath.
+    - **Crossfade** does the same, but fades this song out (and the next one in) over the Fade length.
+    - **Continue Pad** turns the pad on when the song ends, so there's no silence before the next one.
+
+    With AutoLink, Overlap or Crossfade, the next song is loaded in the background while this one plays, so it starts without a gap.
+  - **Library:** a **+** opens the Library beside it: **Songs**, **Albums** and **Artists**, each in alphabetical order, plus the most recently imported songs. Search covers titles, artists and albums. A song's page shows its key, tempo, length and sections, and adds it to the setlist at that spot.
+  - **Song Map:** the sections over the waveform. Click a badge to jump there, or its loop button to loop it. **−** deletes a section, **+** adds one after it, and **•••** has the rest (rename, change type, move its start to the playhead). The **+** at the far left adds a section at the playhead. Everything can be undone.
 - **Library and setlists.** Every song, imported or demo, lives in the library. Setlists are named, ordered lists of library songs, and the main window plays the current one. Open them with the Setlists Menu button:
   - **All Songs:** search the library, and **+ Add** a song to the current setlist (or double-click it).
   - **Setlists:** **+** makes one, and clicking one makes it current. Double-click a setlist to rename it, or right-click it to rename, duplicate or delete it.
@@ -40,20 +53,20 @@ A multitrack backing-track player for live worship and band use, in the spirit o
 - **Side buttons.**
   - **Pad Player** is an ambient pad that keeps playing between songs and can follow the song's key.
   - **Mute MIDI** silences the MIDI messages the app sends (start, stop, continue, and a program change on each song change).
-  - **Link** rolls into the next song when the current one ends.
+  - **Link** makes AutoLink the default for every song whose card still says Cue Next Song.
 - **Importing songs.** Use **Import songs**, **File ▸ Import Songs…** (⌘/Ctrl+I) or **Import Folder…** (⇧⌘/Ctrl+Shift+I), or drop files on the window. You can import several at once:
   - **MultiTracks.com zips** (e.g. `Goodness of God-Victory-Ab-63.00bpm.zip`), and the folders they unzip to. Each becomes a song:
-    - Title, artist, key and BPM come from the name.
+    - Title, album, key and BPM come from the name. Add the artist in Song Settings.
     - The stems are the WAVs in the `MultiTracks/` folder, and `Album.jpg` becomes the cover.
     - The song sections come from the Ableton set's locators (`MultiTrack.als`). Their times follow its tempo map, including tempo changes.
     - Ableton project files and the hidden `__MACOSX/._*` copies Macs add are left out.
   - **Large zips are fine.** They're read straight from disk, one stem at a time, and each stem is checked against the zip's CRC-32. A damaged file is skipped and the app says so; the rest of the song still imports.
   - **Any other folder** of stems becomes a song, and **loose audio files** dropped together become one song.
-- **Click Track.** A song with a click stem (MultiTracks' **Click Track**) plays it as the click. It goes through the Click fader and the Click bus's output routing (e.g. to the in-ear outputs), and the generated click stays silent. The song's own click follows its tempo changes, which a click generated from one BPM can't. Change it in **EDIT ▸ Song ▸ Click** (Generated, or any stem); the change is undoable.
+- **Click Track.** A song with a click stem (MultiTracks' **Click Track**) plays it as the click. It goes through the Click fader and the Click bus's output routing (e.g. to the in-ear outputs), and the generated click stays silent. The song's own click follows its tempo changes, which a click generated from one BPM can't. Change it in **Song Settings ▸ Click** (Generated, or any stem); the change is undoable.
 - **WAV decoding.** Player has its own WAV reader. It runs on several CPU cores at once, so a song's stems load in parallel and large stems don't freeze the UI. It handles:
   - 8/16/24/32-bit PCM, 32/64-bit float, A-law and µ-law
   - WAVE_FORMAT_EXTENSIBLE files, RF64/BW64 files over 4 GB, and recorder files whose headers were never finalised
-  - Metadata DAWs embed in exports: cue markers with labels become song sections, the `acid` chunk sets tempo and meter, and `LIST/INFO` sets the song title
+  - Metadata DAWs embed in exports: cue markers with labels become song sections, the `acid` chunk sets tempo and meter, and `LIST/INFO` sets the song's title, artist and album
 
   Other formats (MP3, AAC/M4A, FLAC, OGG, AIFF) use the built-in decoder. Files that can't be decoded are skipped, and the app says why.
 - **Demo songs.** Three synthesized demo songs are included, so the app works without any setup.
@@ -157,5 +170,5 @@ To try updates against a stand-in for GitHub, set `PLAYER_UPDATE_API` to its add
 ## Notes / next steps
 
 - Stems are decoded fully into memory, so a song with many long stems uses a lot of RAM: a typical 17-stem MultiTracks song needs about 1.5 GB. Only the current song is kept loaded. Streaming stems from disk would remove this limit.
-- With **Link**, the next song loads from disk when the current one ends, so there's a short gap. Preloading the next song would remove it.
+- **Cue Next Song** loads the next song when the current one ends, which takes a moment for a large song. AutoLink, Overlap and Crossfade preload it.
 - The Guide stem in the demo songs plays cue chimes, not spoken cues.

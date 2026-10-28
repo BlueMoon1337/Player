@@ -16,22 +16,38 @@ export interface SongRecord {
   sections: Section[]
   stems: { id: string; name: string; file: string }[]
   artist?: string
+  album?: string
+  /** When it was imported (ms since 1970), for the library's Recent list. */
+  added?: number
   /** Cover picture in the song folder (e.g. a MultiTracks download's Album.jpg). */
   artwork?: string
   /** The stem used as the click (a MultiTracks "Click Track"); otherwise the click is generated. */
   clickStem?: string | null
 }
 
-/** What happens when a song in a setlist ends: stop, continue into the next song, or loop it. */
-export type SongEnd = 'stop' | 'next' | 'loop'
+/**
+ * What happens when a song in a setlist ends (as in Playback):
+ *   cue        the next song is loaded, ready to play (after the last song: the first one)
+ *   stay       nothing; the song stays loaded at its end
+ *   link       AutoLink: the next song starts straight away
+ *   overlap    the next song starts at this one's last section, which plays out underneath
+ *   crossfade  as overlap, but this one fades out as the next comes in
+ */
+export type SongEnd = 'cue' | 'stay' | 'link' | 'overlap' | 'crossfade'
+
+export interface SongEndSetting {
+  end: SongEnd
+  /** Turn the pad on when the song ends, so there's no silence before the next one. */
+  continuePad: boolean
+}
 
 export interface SetlistRecord {
   id: string
   name: string
   /** Song ids in order (demo songs are `demo-N`). */
   songs: string[]
-  /** Per song, what happens when it ends; missing means stop. */
-  ends?: Record<string, SongEnd>
+  /** Per song, what happens when it ends; missing means cue the next song, pad off. */
+  ends?: Record<string, { end?: SongEnd; pad?: boolean }>
 }
 
 /** What library.json keeps (version 2). */
@@ -53,7 +69,7 @@ export interface LibraryData {
 export interface CreatedSong {
   /** '' when nothing could be imported from this zip or folder (see `failed`). */
   songId: string
-  /** The zip or folder the song came from; a MultiTracks name carries title, artist, key and BPM. */
+  /** The zip or folder the song came from; a MultiTracks name carries title, album, key and BPM. */
   sourceName?: string
   /** Copied stems: original file name and the name it was saved under. */
   files: { name: string; file: string }[]

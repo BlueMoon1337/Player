@@ -101,7 +101,12 @@ export class Engine {
   private channels = new Map<string, Channel>()
   private order: string[] = []
   private sources: AudioBufferSourceNode[] = []
+  private sourceChannel = new WeakMap<AudioBufferSourceNode, Channel>()
   private song: Song | null = null
+  /** Overlap / Crossfade: when playback crosses this point the next song is handed in. */
+  private handoffAt: number | null = null
+  private handoffListeners = new Set<() => void>()
+  private lastTickPos: number | null = null
 
   private playing = false
   private startCtxTime = 0
@@ -358,6 +363,76 @@ export class Engine {
     this.emit()
   }
 
+  /**
+   * Overlap / Crossfade: loads the next song and starts it while this one's stems play out
+   * underneath, or fade out over `crossfade` seconds as the next song fades in.
+   */
+  async handOff(next: Song, crossfade: number | null) {
+    if (this.playing) this.ringOut(crossfade)
+    this.load(next)
+    if (crossfade) {
+      const now = this.ctx.currentTime
+      for (const ch of this.channels.values()) {
+        if (!ch.fromSong || ch.group !== 'stem') continue
+        ch.input.gain.setValueAtTime(0, now)
+        ch.input.gain.linearRampToValueAtTime(1, now + crossfade)
+      }
+    }
+    await this.play()
+  }
+
+  /** Takes the playing song's stems out of the mixer but leaves them sounding until they end (or fade). */
+  private ringOut(fade: number | null) {
+    const keep = this.sources.filter((s) => {
+      const ch = this.sourceChannel.get(s)
+      return ch?.fromSong && ch.group === 'stem'
+    })
+    if (!keep.length) return
+    this.sources = this.sources.filter((s) => !keep.includes(s))
+    const chans = new Set(keep.map((s) => this.sourceChannel.get(s)!))
+    for (const ch of chans) {
+      this.channels.delete(ch.id)
+      this.order = this.order.filter((o) => o !== ch.id)
+    }
+    const now = this.ctx.currentTime
+    let left = keep.length
+    for (const s of keep) {
+      s.onended = () => {
+        s.disconnect()
+        if (--left > 0) return
+        for (const ch of chans) {
+          ch.gain.disconnect()
+          ch.panner.disconnect()
+        }
+      }
+      if (fade) {
+        try {
+          s.stop(now + fade)
+        } catch {
+          /* already over */
+        }
+      }
+    }
+    if (fade) {
+      for (const ch of chans) {
+        ch.input.gain.setValueAtTime(ch.input.gain.value, now)
+        ch.input.gain.linearRampToValueAtTime(0, now + fade)
+      }
+    }
+  }
+
+  /** Where the next song is handed in (Overlap / Crossfade); null for none. */
+  setHandoff(time: number | null) {
+    this.handoffAt = time
+  }
+
+  onHandoff(fn: () => void) {
+    this.handoffListeners.add(fn)
+    return () => {
+      this.handoffListeners.delete(fn)
+    }
+  }
+
   /** Stops and lets go of the current song (e.g. it was deleted). */
   unload() {
     this.stopSources()
@@ -456,9 +531,11 @@ export class Engine {
       src.connect(ch.input)
       src.start(when, Math.min(offset, ch.buffer.duration))
       this.sources.push(src)
+      this.sourceChannel.set(src, ch)
     }
     this.startCtxTime = when
     this.startOffset = offset
+    this.lastTickPos = null
   }
 
   private stopSources(when?: number) {
@@ -518,6 +595,7 @@ export class Engine {
       this.prevBase = null
     } else {
       this.pausedPos = time
+      this.lastTickPos = null
     }
     this.emit()
   }
@@ -680,7 +758,17 @@ export class Engine {
     if (this.pendingJump && this.ctx.currentTime >= this.pendingJump.when) {
       this.pendingJump = null
       this.prevBase = null
+      this.lastTickPos = null
       this.emit()
+    }
+    // The hand-off point fires when playback runs across it, not when a seek or jump lands past it.
+    const pos = this.position
+    const last = this.lastTickPos
+    this.lastTickPos = pos
+    const h = this.handoffAt
+    if (h !== null && !this.loop && last !== null && last < h && pos >= h && pos - last < 1.5) {
+      this.handoffListeners.forEach((fn) => fn())
+      return
     }
     if (!this.loop && this.position >= this.song.duration) {
       this.stopSources()

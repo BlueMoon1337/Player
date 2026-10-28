@@ -1,6 +1,6 @@
 /**
  * MultiTracks.com downloads: a zip (or the folder it unzips to) named
- * "Title-Artist-Key-BPMbpm", holding a MultiTracks/ folder of WAV stems (Click Track and
+ * "Title-Album-Key-BPMbpm", holding a MultiTracks/ folder of WAV stems (Click Track and
  * Guide among them), Album.jpg, and an Ableton set (MultiTrack.als) whose locators mark the
  * sections. These rules pick what Player needs out of one; they work for any folder of stems.
  */
@@ -9,7 +9,7 @@ const AUDIO = /\.(wav|wave|bwf|rf64|aif|aiff|flac|mp3|m4a|aac|ogg|oga|opus)$/i
 
 export interface SongName {
   title: string
-  artist?: string
+  album?: string
   key?: string
   bpm?: number
 }
@@ -22,7 +22,7 @@ export function parseSongName(raw: string): SongName {
   const bpm = Number(m[4])
   return {
     title: m[1].trim(),
-    artist: m[2].trim(),
+    album: m[2].trim(),
     key: m[3][0].toUpperCase() + m[3].slice(1),
     bpm: bpm >= 20 && bpm <= 400 ? Math.round(bpm * 100) / 100 : undefined,
   }

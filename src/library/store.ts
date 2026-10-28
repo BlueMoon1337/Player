@@ -9,7 +9,7 @@ import { demoSongs } from '../audio/synth'
 import { type Song, uid } from '../audio/types'
 import { desktop } from '../platform'
 import { songFromRecord } from '../platform/library'
-import type { LibraryState, SetlistRecord, SongEnd } from '../platform/types'
+import type { LibraryState, SetlistRecord, SongEnd, SongEndSetting } from '../platform/types'
 import { UNDO_KEY, record, showNote } from './history'
 
 export type Setlist = SetlistRecord
@@ -200,23 +200,39 @@ export function moveInSetlist(setlistId: string, from: number, to: number) {
   )
 }
 
+const END_LABEL: Record<SongEnd, string> = {
+  cue: 'Cue Next Song After',
+  stay: 'Stay In',
+  link: 'AutoLink',
+  overlap: 'Overlap',
+  crossfade: 'Crossfade',
+}
+
 /** Sets what happens when a song in a setlist ends (the button on its card in edit mode). */
-export function setSongEnd(setlistId: string, songId: string, end: SongEnd) {
+export function setSongEnd(setlistId: string, songId: string, patch: Partial<SongEndSetting>) {
   const sl = state.setlists.find((s) => s.id === setlistId)
-  if (!sl || (sl.ends?.[songId] ?? 'stop') === end) return
-  const label = { stop: 'Stop After', next: 'Continue After', loop: 'Loop' }[end]
-  setlistStep(`${label} ${title(songId)}`, () =>
+  if (!sl) return
+  const was = songEnd(sl, songId)
+  const next = { ...was, ...patch }
+  if (next.end === was.end && next.continuePad === was.continuePad) return
+  const label =
+    next.end !== was.end ? `${END_LABEL[next.end]} ${title(songId)}` : `${next.continuePad ? 'Continue' : 'Stop'} Pad After ${title(songId)}`
+  setlistStep(label, () =>
     replaceSetlist(setlistId, (s) => {
       const ends = { ...s.ends }
-      if (end === 'stop') delete ends[songId]
-      else ends[songId] = end
+      const e: { end?: SongEnd; pad?: boolean } = {}
+      if (next.end !== 'cue') e.end = next.end
+      if (next.continuePad) e.pad = true
+      if (e.end || e.pad) ends[songId] = e
+      else delete ends[songId]
       return { ...s, ends }
     }),
   )
 }
 
-export function songEnd(setlist: Setlist | undefined, songId: string): SongEnd {
-  return setlist?.ends?.[songId] ?? 'stop'
+export function songEnd(setlist: Setlist | undefined, songId: string): SongEndSetting {
+  const e = setlist?.ends?.[songId]
+  return { end: e?.end ?? 'cue', continuePad: e?.pad === true }
 }
 
 export function newSetlist(name: string, songs: string[] = []): string {

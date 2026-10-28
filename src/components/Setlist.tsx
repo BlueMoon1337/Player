@@ -1,7 +1,8 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import type { Song } from '../audio/types'
-import type { SongEnd } from '../platform/types'
+import type { SongEnd, SongEndSetting } from '../platform/types'
 import { type MenuEntry, showContextMenu } from './Ask'
+import { Popover } from './Popover'
 
 interface Props {
   /** The current setlist's songs, in order. */
@@ -20,33 +21,144 @@ interface Props {
   /** Edit mode ("Setlist / Song Map"): Playback's big cards with their controls. */
   editing: boolean
   /** What happens when each song ends, and changing it. */
-  songEnd: (songId: string) => SongEnd
-  onSongEnd: (songId: string, end: SongEnd) => void
-  /** Opens the library to put a song at this position (the end when omitted). */
-  onAddSong: (index?: number) => void
+  songEnd: (songId: string) => SongEndSetting
+  onSongEnd: (songId: string, patch: Partial<SongEndSetting>) => void
+  /** Opens the library, beside the + pressed, to put a song at this position (the end when omitted). */
+  onAddSong: (index: number | undefined, anchor: DOMRect) => void
   onSongSettings: (songId: string) => void
 }
 
-const END_NEXT: Record<SongEnd, SongEnd> = { stop: 'next', next: 'loop', loop: 'stop' }
-const END_LABEL: Record<SongEnd, string> = {
-  stop: 'Stops at the end (click to continue into the next song)',
-  next: 'Continues into the next song (click to loop this song)',
-  loop: 'Loops this song (click to stop at the end)',
+/** 'first' is how Cue reads after the last song: Cue First Song. */
+type EndIconKind = SongEnd | 'first' | 'pad'
+
+const END_LABEL: Record<EndIconKind, string> = {
+  cue: 'Cue Next Song',
+  first: 'Cue First Song',
+  stay: 'Stay In Song',
+  pad: 'Continue Pad',
+  link: 'AutoLink',
+  overlap: 'Overlap',
+  crossfade: 'Crossfade',
 }
 
-function EndIcon({ end }: { end: SongEnd }) {
+const END_HINT: Record<EndIconKind, string> = {
+  cue: 'At the end, the next song is loaded, ready to play',
+  first: 'At the end, the first song is loaded, ready to play',
+  stay: 'At the end, this song stays loaded',
+  pad: 'At the end, the pad comes on',
+  link: 'At the end, the next song starts playing',
+  overlap: 'The next song starts at this one’s last section, which plays out underneath',
+  crossfade: 'The next song starts at this one’s last section as this one fades out',
+}
+
+export function EndIcon({ kind }: { kind: EndIconKind }) {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      {end === 'next' && <path d="M4 12h12M12 7l5 5-5 5" />}
-      {end === 'loop' && <path d="M8 8H5V5M5.6 8.4A7 7 0 1 1 5 13" />}
-      {end === 'stop' && <rect x="7" y="7" width="10" height="10" rx="1.5" />}
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={`end-icon end-icon-${kind}`}>
+      {kind === 'cue' && (
+        <>
+          <path d="M3 12h2.5M8.5 12H15" />
+          <path className="fill" d="M14 7.5l6.5 4.5-6.5 4.5z" />
+        </>
+      )}
+      {kind === 'stay' && (
+        <>
+          <path d="M2.5 12h2M7 12h5" />
+          <path className="fill" d="M11.5 8l5.5 4-5.5 4z" />
+          <path d="M20 6.5v11" />
+        </>
+      )}
+      {kind === 'first' && (
+        <>
+          <path d="M9.5 4.5L6 8l3.5 3.5" />
+          <path d="M6.5 8h8a4.5 4.5 0 0 1 0 9H11" />
+          <circle className="fill" cx="6.3" cy="17" r="1.7" />
+        </>
+      )}
+      {kind === 'pad' && <circle cx="12" cy="12" r="8" />}
+      {kind === 'link' && (
+        <>
+          <rect x="2.5" y="8" width="11" height="8" rx="4" />
+          <rect x="10.5" y="8" width="11" height="8" rx="4" />
+        </>
+      )}
+      {kind === 'overlap' && <path d="M4 6h8.5a2.5 2.5 0 0 1 0 5h-2M13.5 13h-2a2.5 2.5 0 0 0 0 5H20" />}
+      {kind === 'crossfade' && <path d="M4 5c7.5 0 8.5 14 16 14M4 19c7.5 0 8.5-14 16-14" />}
     </svg>
+  )
+}
+
+/** As it reads on the card: after the last song, Cue means the first song, and only Stay is kept. */
+const shownEnd = (s: SongEndSetting, last: boolean): EndIconKind =>
+  last ? (s.end === 'stay' ? 'stay' : 'first') : s.end
+
+/** Playback's end-of-song popover, beside the button on a song's card. */
+function EndMenu({
+  anchor,
+  setting,
+  last,
+  onChange,
+  onClose,
+}: {
+  anchor: DOMRect
+  setting: SongEndSetting
+  last: boolean
+  onChange: (patch: Partial<SongEndSetting>) => void
+  onClose: () => void
+}) {
+  const current = shownEnd(setting, last)
+  const choice = (kind: EndIconKind, end: SongEnd) => (
+    <button
+      key={kind}
+      role="menuitemradio"
+      aria-checked={current === kind}
+      className="em-row"
+      title={END_HINT[kind]}
+      onClick={() => {
+        onChange({ end })
+        onClose()
+      }}
+    >
+      <EndIcon kind={kind} />
+      <span className="em-label">{END_LABEL[kind]}</span>
+      {current === kind && (
+        <svg className="em-check" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 12.5l4.5 4.5L19 7" />
+        </svg>
+      )}
+    </button>
+  )
+
+  return (
+    <Popover anchor={anchor} className="end-menu" ignore=".ec-end.open" onClose={onClose}>
+      {choice(last ? 'first' : 'cue', 'cue')}
+      {choice('stay', 'stay')}
+      <label className="em-row em-pad" title={END_HINT.pad}>
+        <EndIcon kind="pad" />
+        <span className="em-label">{END_LABEL.pad}</span>
+        <input
+          type="checkbox"
+          role="switch"
+          className="switch"
+          checked={setting.continuePad}
+          onChange={(e) => onChange({ continuePad: e.target.checked })}
+        />
+      </label>
+      {!last && (
+        <>
+          {choice('link', 'link')}
+          {choice('overlap', 'overlap')}
+          {choice('crossfade', 'crossfade')}
+        </>
+      )}
+    </Popover>
   )
 }
 
 export function Setlist(p: Props) {
   const { songs, currentId, onSelect, onImport, onImportClick, onRemove, onMove, onDelete, editing } = p
   const input = useRef<HTMLInputElement>(null)
+  /** The end-of-song popover: which card (by position) and where its button is. */
+  const [endMenu, setEndMenu] = useState<{ index: number; anchor: DOMRect } | null>(null)
   const menu = (s: Song, i: number): MenuEntry[] => [
     { label: 'Load', onClick: () => onSelect(s.id) },
     { label: 'Song Settings…', onClick: () => p.onSongSettings(s.id) },
@@ -76,7 +188,8 @@ export function Setlist(p: Props) {
     return (
       <div className="setlist editing">
         {songs.map((s, i) => {
-          const end = p.songEnd(s.id)
+          const setting = p.songEnd(s.id)
+          const end = shownEnd(setting, i === songs.length - 1)
           return (
             <div key={`${s.id}-${i}`} className={`ecard-wrap ${s.id === currentId ? 'active' : ''}`}>
               <div className="ecard" onContextMenu={(e) => showContextMenu(e, menu(s, i))} onDoubleClick={() => onSelect(s.id)}>
@@ -97,15 +210,18 @@ export function Setlist(p: Props) {
                   •••
                 </button>
                 <button
-                  className={`ec-btn ec-end end-${end}`}
-                  title={END_LABEL[end]}
-                  aria-label={END_LABEL[end]}
-                  onClick={() => p.onSongEnd(s.id, END_NEXT[end])}
+                  className={`ec-btn ec-end end-${end} ${setting.continuePad ? 'pad' : ''} ${endMenu?.index === i ? 'open' : ''}`}
+                  title={`At the end: ${END_LABEL[end]}${setting.continuePad ? ', Continue Pad' : ''}`}
+                  aria-label={`At the end: ${END_LABEL[end]}`}
+                  aria-haspopup="menu"
+                  onClick={(e) =>
+                    setEndMenu(endMenu?.index === i ? null : { index: i, anchor: e.currentTarget.getBoundingClientRect() })
+                  }
                 >
-                  <EndIcon end={end} />
+                  <EndIcon kind={end} />
                 </button>
                 {i < songs.length - 1 && (
-                  <button className="ec-btn ec-insert" title="Add a song here" onClick={() => p.onAddSong(i + 1)}>
+                  <button className="ec-btn ec-insert" title="Add a song here" onClick={(e) => p.onAddSong(i + 1, e.currentTarget.getBoundingClientRect())}>
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M12 6v12M6 12h12" />
                     </svg>
@@ -125,7 +241,7 @@ export function Setlist(p: Props) {
           )
         })}
         <div className="ecard-wrap">
-          <button className="ecard ecard-add" onClick={() => p.onAddSong()}>
+          <button className="ecard ecard-add" onClick={(e) => p.onAddSong(undefined, e.currentTarget.getBoundingClientRect())}>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 5v14M5 12h14" />
             </svg>
@@ -134,6 +250,15 @@ export function Setlist(p: Props) {
           <div className="ecard-title placeholder" />
         </div>
         {picker}
+        {endMenu && songs[endMenu.index] && (
+          <EndMenu
+            anchor={endMenu.anchor}
+            setting={p.songEnd(songs[endMenu.index].id)}
+            last={endMenu.index === songs.length - 1}
+            onChange={(patch) => p.onSongEnd(songs[endMenu.index].id, patch)}
+            onClose={() => setEndMenu(null)}
+          />
+        )}
       </div>
     )
   }

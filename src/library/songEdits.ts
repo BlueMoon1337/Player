@@ -1,5 +1,5 @@
 /**
- * Undo for song edits (title, key, tempo, time signature, click offset, sections). Each edit
+ * Undo for song edits (title, artist, album, key, tempo, time signature, click offset, sections). Each edit
  * records the song's editable fields before and after; undo puts them back. Typing into one
  * field joins into a single step (history.ts).
  */
@@ -9,6 +9,7 @@ import { record } from './history'
 interface SongSnapshot {
   title: string
   artist: string | undefined
+  album: string | undefined
   key: string
   bpm: number
   timeSig: [number, number]
@@ -21,6 +22,7 @@ function snapshot(song: Song): SongSnapshot {
   return {
     title: song.title,
     artist: song.artist,
+    album: song.album,
     key: song.key,
     bpm: song.bpm,
     timeSig: [song.timeSig[0], song.timeSig[1]],
@@ -53,6 +55,7 @@ function apply(song: Song, snap: SongSnapshot, kind: ChangeKind) {
   Object.assign(song, {
     title: snap.title,
     artist: snap.artist,
+    album: snap.album,
     key: snap.key,
     bpm: snap.bpm,
     timeSig: [snap.timeSig[0], snap.timeSig[1]],

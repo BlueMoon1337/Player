@@ -248,6 +248,13 @@ export function EditPanel({ engine, song, edit, sectionsEditable = true }: EditP
             onChange={(e) => edit('Change Artist', () => (song.artist = e.target.value || undefined), 'artist')}
           />
         </label>
+        <label>
+          Album
+          <input
+            value={song.album ?? ''}
+            onChange={(e) => edit('Change Album', () => (song.album = e.target.value || undefined), 'album')}
+          />
+        </label>
         <div className="row">
           <label>
             Key

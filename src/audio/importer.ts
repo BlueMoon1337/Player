@@ -136,8 +136,10 @@ export async function importStems(
   const bpm = metas.find((m) => m.bpm)?.bpm ?? null
   const timeSig = metas.find((m) => m.timeSig)?.timeSig ?? null
   const metaTitle = metas.find((m) => m.title)?.title ?? null
+  const metaArtist = metas.find((m) => m.artist)?.artist ?? undefined
+  const metaAlbum = metas.find((m) => m.album)?.album ?? undefined
 
-  // What's known from outside the audio wins: a MultiTracks name (title, artist, key, BPM),
+  // What's known from outside the audio wins: a MultiTracks name (title, album, key, BPM),
   // then its Ableton set (sections, time signature), then what the WAV files carry.
   const name = opts.meta?.name
   const set = opts.meta?.ableton
@@ -147,7 +149,7 @@ export async function importStems(
   const clickStem = stems.find((s) => isClickStem(s.name))
 
   const notes: string[] = []
-  if (name?.artist) notes.push(`title, artist, key and tempo from the name`)
+  if (name?.album) notes.push(`title, album, key and tempo from the name`)
   if (setMarkers) notes.push(`${setMarkers.markers.length} sections from the Ableton set`)
   else if (markerSource) notes.push(`${markerSource.markers.length} section markers`)
   if (!name?.bpm && (set?.bpm || bpm)) notes.push(`${finalBpm} BPM`)
@@ -155,7 +157,7 @@ export async function importStems(
   if (clickStem) notes.push(`its ${clickStem.name} as the click`)
 
   const title =
-    (name?.artist ? name.title : null) ||
+    (name?.album ? name.title : null) ||
     metaTitle ||
     prefix.replace(/[\s_\-.]+$/, '') ||
     name?.title ||
@@ -163,7 +165,9 @@ export async function importStems(
   const song: Song = {
     id: opts.songId ?? uid('song'),
     title,
-    artist: name?.artist,
+    artist: metaArtist,
+    album: name?.album ?? metaAlbum,
+    added: Date.now(),
     key: name?.key ?? 'C',
     bpm: finalBpm,
     timeSig: finalSig,

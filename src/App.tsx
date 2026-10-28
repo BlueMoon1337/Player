@@ -9,6 +9,7 @@ import { AskHost, ContextMenuHost, isAsking } from './components/Ask'
 import { Mixer } from './components/Mixer'
 import { BusesPanel, Menu, PadPanel, SongSettingsDialog } from './components/Panels'
 import { Setlist } from './components/Setlist'
+import { LibraryPicker } from './components/LibraryPicker'
 import { SetlistsMenu, confirmDeleteSong } from './components/SetlistsMenu'
 import { Timeline } from './components/Timeline'
 import { Transport } from './components/Transport'
@@ -16,6 +17,7 @@ import { UpdateDialog } from './components/UpdateDialog'
 import { clearNote, redo, undo, useHistory } from './library/history'
 import { editSong, onSongChanged } from './library/songEdits'
 import {
+  addToSetlist,
   currentSetlist,
   importSongs,
   loadLibrary,
@@ -29,6 +31,7 @@ import {
   useLibrary,
 } from './library/store'
 import { type MenuCommand, desktop } from './platform'
+import type { SongEndSetting } from './platform/types'
 import { type LibraryImport, importIntoLibrary, loadSongStems, recordFromSong } from './platform/library'
 import { readZipSong } from './import/webZip'
 import { checkForUpdates, startUpdateChecks, useUpdates } from './platform/updates'
@@ -84,8 +87,8 @@ export default function App() {
   // Edit mode: Playback's "Setlist / Song Map".
   const [editing, setEditingState] = useState(false)
   const [settingsFor, setSettingsFor] = useState<string | null>(null)
-  /** The Setlists window opened from a + in the setlist: library view, adding at this position. */
-  const [addAt, setAddAt] = useState<number | null>(null)
+  /** The Library popover, opened from a + in the setlist: adding at this position. */
+  const [addAt, setAddAt] = useState<{ index: number; anchor: DOMRect } | null>(null)
   const [setlistOpen, setSetlistOpen] = useState(true)
   const [setlistsOpen, setSetlistsOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -182,40 +185,66 @@ export default function App() {
     pad.setKey(k)
   }
 
-  /** Loads a library song into the player (rendering or reading its stems first). */
-  const selectSong = useCallback(
-    async (id: string, autoplay = false) => {
-      const target = lib.songs[id]
-      if (!target) return
-      engine.pause()
-      if (target.stems.length === 0 && target.source === 'demo') {
-        setLoading(`Rendering “${target.title}”…`)
+  /** Stem loads under way (or done), so a preload and a selection never decode the same song twice. */
+  const stemLoads = useRef(new Map<string, Promise<void>>())
+
+  /** Renders or reads a song's stems if they aren't in memory. `quiet` (a preload) shows no overlay. */
+  const ensureStems = useCallback((target: Song, quiet = false): Promise<void> => {
+    if (target.stems.length || (target.source !== 'demo' && target.source !== 'library')) return Promise.resolve()
+    const pending = stemLoads.current.get(target.id)
+    if (pending) {
+      if (!quiet) setLoading(`Loading “${target.title}”…`)
+      return pending.finally(() => !quiet && setLoading(null))
+    }
+    const job = (async () => {
+      if (target.source === 'demo') {
+        if (!quiet) setLoading(`Rendering “${target.title}”…`)
         // Let the overlay paint before the synchronous render.
         await new Promise((r) => setTimeout(r, 30))
         target.stems = renderDemoStems(engine.ctx, target)
-        setLoading(null)
-      } else if (target.stems.length === 0 && target.source === 'library') {
-        setLoading(`Loading “${target.title}”…`)
-        const { stems, missing } = await loadSongStems(engine.ctx, target, (d, t, n) =>
-          setLoading(progressText('Loading')(d, t, n)),
-        )
+      } else {
+        if (!quiet) setLoading(`Loading “${target.title}”…`)
+        const { stems, missing } = await loadSongStems(engine.ctx, target, (d, t, n) => {
+          if (!quiet) setLoading(progressText('Loading')(d, t, n))
+        })
         target.stems = stems
-        setLoading(null)
         if (missing.length) {
           setNotice({ kind: 'warn', text: `“${target.title}”: couldn't load ${missing.join(', ')}` })
         }
       }
+      if (!peaks.current.has(target.id)) peaks.current.set(target.id, computePeaks(target.stems, target.duration))
+    })().finally(() => {
+      stemLoads.current.delete(target.id)
+      if (!quiet) setLoading(null)
+    })
+    stemLoads.current.set(target.id, job)
+    return job
+  }, [])
+
+  /**
+   * Loads a library song into the player (rendering or reading its stems first). `start`: just
+   * load it ('cue'), load and play it ('play'), or hand it in under the playing song (Overlap /
+   * Crossfade) without stopping that one first.
+   */
+  const selectSong = useCallback(
+    async (id: string, start: 'cue' | 'play' | { crossfade: number | null } = 'cue') => {
+      const target = lib.songs[id]
+      if (!target) return
+      const handoff = typeof start === 'object' ? start : null
+      if (!handoff) engine.pause()
+      await ensureStems(target, !!handoff)
       // Demo and library stems can be reloaded at any time, so only keep the current song in memory.
       for (const s of Object.values(lib.songs)) if (s.id !== id && s.source !== 'user') s.stems = []
       if (!peaks.current.has(id)) peaks.current.set(id, computePeaks(target.stems, target.duration))
-      engine.load(target)
+      if (handoff) await engine.handOff(target, handoff.crossfade)
+      else engine.load(target)
       setCurrentId(id)
       engine.sendMidi([0xc0, Math.max(0, songs.indexOf(target)) & 0x7f])
       if (padFollow) setPadKey(keyRoot(target.key))
-      if (autoplay) await engine.play()
+      if (start === 'play') await engine.play()
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lib, songs, padFollow],
+    [lib, songs, padFollow, ensureStems],
   )
 
   // Load the first song once the library is ready.
@@ -234,21 +263,62 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lib.songs, currentId])
 
-  // When a song ends: what its card in the setlist says (stop, continue, loop). Link continues after every song.
+  /**
+   * What happens when the song at `index` ends: what its card in the setlist says. The Link
+   * switch makes AutoLink the default; after the last song, the first is cued (unless it stays).
+   */
+  const endFor = useCallback(
+    (index: number): SongEndSetting => {
+      const s = songEnd(setlist ?? undefined, songs[index].id)
+      let end = s.end
+      if (link && end === 'cue') end = 'link'
+      if (index === songs.length - 1 && end !== 'stay') end = 'cue'
+      return { ...s, end }
+    },
+    [setlist, songs, link],
+  )
+  const currentIndex = songs.findIndex((s) => s.id === currentId)
+
   useEffect(
     () =>
       engine.onEnded(() => {
-        const end = link ? 'next' : currentId ? songEnd(setlist ?? undefined, currentId) : 'stop'
-        if (end === 'loop') {
-          engine.seek(0)
-          void engine.play()
-        } else if (end === 'next') {
-          const i = songs.findIndex((s) => s.id === currentId)
-          if (i >= 0 && i + 1 < songs.length) void selectSong(songs[i + 1].id, true)
+        const i = currentIndex
+        if (i < 0) return
+        const { end, continuePad } = endFor(i)
+        if (continuePad) setPadOn(true)
+        if (end === 'stay') return
+        if (end === 'cue') {
+          const next = songs[i + 1] ?? songs[0]
+          if (next.id === currentId) engine.seek(0)
+          else void selectSong(next.id)
+        } else {
+          // AutoLink, or an Overlap / Crossfade whose hand-off point was never crossed.
+          void selectSong(songs[i + 1].id, 'play')
         }
       }),
-    [link, songs, currentId, selectSong, setlist],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentIndex, currentId, songs, endFor, selectSong],
   )
+
+  // Overlap / Crossfade: the next song comes in at this one's last section (or a fade length before
+  // its end). It, and AutoLink's next song, are read into memory ahead of time so there's no gap.
+  useEffect(() => {
+    const i = currentIndex
+    const next = songs[i + 1]
+    if (i < 0 || !song || !next) return void engine.setHandoff(null)
+    const { end, continuePad } = endFor(i)
+    if (end === 'link' || end === 'overlap' || end === 'crossfade') {
+      void ensureStems(next, true).catch(() => {})
+    }
+    if (end !== 'overlap' && end !== 'crossfade') return void engine.setHandoff(null)
+    const last = song.sections.length > 1 ? song.sections[song.sections.length - 1].start : null
+    engine.setHandoff(last ?? Math.max(0, song.duration - fadeSeconds))
+    return engine.onHandoff(() => {
+      if (continuePad) setPadOn(true)
+      void selectSong(next.id, { crossfade: end === 'crossfade' ? fadeSeconds : null })
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIndex, song, songs, endFor, selectSong, ensureStems, fadeSeconds, version])
 
   const step = useCallback(
     (dir: -1 | 1) => {
@@ -516,10 +586,7 @@ export default function App() {
           playing={state.playing}
           songEnd={(id) => songEnd(setlist ?? undefined, id)}
           onSongEnd={(id, end) => setlist && setSongEnd(setlist.id, id, end)}
-          onAddSong={(index) => {
-            setAddAt(index ?? songs.length)
-            setSetlistsOpen(true)
-          }}
+          onAddSong={(index, anchor) => setAddAt({ index: index ?? songs.length, anchor })}
           onSongSettings={setSettingsFor}
           onSelect={(id) => void selectSong(id)}
           onImport={importFiles}
@@ -574,12 +641,23 @@ export default function App() {
           playing={state.playing}
           onLoadSong={(id) => void selectSong(id)}
           onImport={() => openImport()}
-          addAt={addAt}
-          onAdded={() => setAddAt((i) => (i === null ? i : i + 1))}
-          onClose={() => {
-            setSetlistsOpen(false)
+          onClose={() => setSetlistsOpen(false)}
+        />
+      )}
+      {addAt && setlist && (
+        <LibraryPicker
+          anchor={addAt.anchor}
+          setlistName={setlist.name}
+          position={addAt.index}
+          onAdd={(id) => {
+            addToSetlist(setlist.id, [id], addAt.index)
             setAddAt(null)
           }}
+          onImport={() => {
+            setAddAt(null)
+            openImport()
+          }}
+          onClose={() => setAddAt(null)}
         />
       )}
       {settingsFor && lib.songs[settingsFor] && (

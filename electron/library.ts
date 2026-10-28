@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import type { LibraryData, LibraryState, SetlistRecord, SongRecord } from '../src/platform/types'
+import type { LibraryData, LibraryState, SetlistRecord, SongEnd, SongRecord } from '../src/platform/types'
+
+const SONG_ENDS: SongEnd[] = ['cue', 'stay', 'link', 'overlap', 'crossfade']
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/
 
@@ -56,9 +58,13 @@ function parseLibraryFile(raw: unknown): LibraryState | null {
   const setlists: SetlistRecord[] = lib.setlists
     .filter((s: Record<string, unknown>) => s && typeof s.id === 'string' && ID_RE.test(s.id) && typeof s.name === 'string')
     .map((s: Record<string, unknown>) => {
-      const ends: Record<string, 'next' | 'loop'> = {}
-      for (const [k, v] of Object.entries((s.ends as Record<string, unknown>) ?? {})) {
-        if (ID_RE.test(k) && (v === 'next' || v === 'loop')) ends[k] = v
+      const ends: NonNullable<SetlistRecord['ends']> = {}
+      for (const [k, v] of Object.entries((s.ends as Record<string, Record<string, unknown>>) ?? {})) {
+        if (!ID_RE.test(k) || !v || typeof v !== 'object') continue
+        const e: { end?: SongEnd; pad?: boolean } = {}
+        if (SONG_ENDS.includes(v.end as SongEnd) && v.end !== 'cue') e.end = v.end as SongEnd
+        if (v.pad === true) e.pad = true
+        if (e.end || e.pad) ends[k] = e
       }
       return { id: s.id as string, name: (s.name as string).slice(0, 80), songs: ids(s.songs), ends }
     })
