@@ -50,8 +50,8 @@ const padFromRecord = (r: PadRecord): ImportedPad => ({
   files: r.files.map((f) => ({ key: f.key, name: f.file, input: padUrl(r.id, f.file) })),
 })
 
-function loadSettings(): { jumpMode: JumpMode; fadeSeconds: number; link: boolean; padSound: string } {
-  const defaults = { jumpMode: 'bar' as JumpMode, fadeSeconds: 4, link: false, padSound: 'warm' }
+function loadSettings(): { jumpMode: JumpMode; fadeSeconds: number; link: boolean; padSound: string; autoPad: boolean } {
+  const defaults = { jumpMode: 'bar' as JumpMode, fadeSeconds: 4, link: false, padSound: 'warm', autoPad: true }
   try {
     return { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }
   } catch {
@@ -117,6 +117,8 @@ export default function App() {
   const [fadeSeconds, setFadeSeconds] = useState(initial.fadeSeconds)
   const [link, setLink] = useState(initial.link)
   const [padSound, setPadSoundState] = useState(initial.padSound)
+  /** The pad comes on, in the song's key, when a song starts. */
+  const [autoPad, setAutoPad] = useState(initial.autoPad)
   const [importedPads, setImportedPads] = useState<ImportedPad[]>([])
   const padPicker = useRef<HTMLInputElement>(null)
   const peaks = useRef(new Map<string, Float32Array>())
@@ -126,11 +128,11 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ jumpMode, fadeSeconds, link, padSound }))
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ jumpMode, fadeSeconds, link, padSound, autoPad }))
     } catch {
       /* storage unavailable */
     }
-  }, [jumpMode, fadeSeconds, link, padSound])
+  }, [jumpMode, fadeSeconds, link, padSound, autoPad])
 
   const setPadSound = (id: string) => {
     setPadSoundState(id)
@@ -293,6 +295,19 @@ export default function App() {
     setPadKeyState(k)
     pad.setKey(k)
   }
+
+  // Pad On When a Song Starts: the first time each song plays (also when the next song comes in by
+  // AutoLink, Overlap or Crossfade), and whenever it plays from the top; not on resuming after a pause.
+  const autoPadSong = useRef<string | null>(null)
+  useEffect(() => {
+    if (!state.playing || !song) return
+    const fresh = autoPadSong.current !== song.id || engine.position < 0.5
+    autoPadSong.current = song.id
+    if (!fresh || !autoPad) return
+    setPadKey(keyRoot(song.key))
+    if (!padOn) setPadOn(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.playing, song?.id])
 
   /** Stem loads under way (or done), so a preload and a selection never decode the same song twice. */
   const stemLoads = useRef(new Map<string, Promise<void>>())
@@ -726,10 +741,12 @@ export default function App() {
           setPadOn={setPadOn}
           padKey={padKey}
           playPadKey={(k) => {
-            setPadFollow(false)
+            // A key picked by hand holds until another song is chosen (with Follow Song Key on).
             setPadKey(k)
             if (!padOn) setPadOn(true)
           }}
+          autoPad={autoPad}
+          setAutoPad={setAutoPad}
           padFollow={padFollow}
           setPadFollow={(v) => {
             setPadFollow(v)

@@ -18,8 +18,11 @@ interface Props {
   padOn: boolean
   setPadOn: (on: boolean) => void
   padKey: string
-  /** Picks a key by hand (which unlinks the pad from the song) and starts the pad. */
+  /** Picks a key by hand and starts the pad; the next song chosen brings its own key (Follow Song Key). */
   playPadKey: (k: string) => void
+  /** Pad On When a Song Starts (in the sound menu): on, in the song's key, as each song starts. */
+  autoPad: boolean
+  setAutoPad: (v: boolean) => void
   /** The pad follows the loaded song's key (in the sound menu). */
   padFollow: boolean
   setPadFollow: (v: boolean) => void
@@ -209,6 +212,7 @@ export function Mixer(p: Props) {
       if (p.importedPads.length) entries.push('separator', ...p.importedPads.map((x) => item(x.id, x.name)))
       entries.push(
         'separator',
+        { label: `${p.autoPad ? '✓ ' : ''}Pad On When a Song Starts`, onClick: () => p.setAutoPad(!p.autoPad) },
         { label: `${p.padFollow ? '✓ ' : ''}Follow Song Key`, onClick: () => p.setPadFollow(!p.padFollow) },
         { label: 'Import Pads…', onClick: p.onImportPads },
       )
@@ -252,7 +256,7 @@ export function Mixer(p: Props) {
                 <b>{sound.name}</b>
                 <span>
                   {sound.by}
-                  {p.padFollow ? ' · follows the song’s key' : ''}
+                  {p.autoPad ? ' · on with each song' : p.padFollow ? ' · follows the song’s key' : ''}
                 </span>
               </span>
               <svg className="pad-chevron" viewBox="0 0 24 24" aria-hidden="true">
