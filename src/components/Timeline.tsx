@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Engine, EngineState, JumpMode, LoopMode } from '../audio/engine'
 import { barLength } from '../audio/synth'
 import {
@@ -31,12 +31,54 @@ interface Props {
 
 /** A section narrower than this shows a ••• menu instead of its − and + buttons (as Playback does). */
 const FULL_CONTROLS_PX = 130
+/** A section narrower than this has its loop button at the bottom left, under its badge (as Playback does). */
+const LOOP_ON_TOP_PX = 110
+
+/**
+ * Like Playback, the timeline shows about this much of the song across its width and scrolls for
+ * the rest (a song this short or shorter fits the width).
+ */
+const VISIBLE_SECONDS = 60
+/** While playing, the view follows with the playhead this far in from the left. */
+const PLAYHEAD_LEAD = 0.12
+/** After scrolling by hand, the view waits this long before following the playhead again. */
+const HAND_SCROLL_MS = 3000
 
 export function Timeline({ engine, state, song, peaks, jumpMode, version, editing = false, edit }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const wrap = useRef<HTMLDivElement>(null)
   const playhead = useRef<HTMLDivElement>(null)
   const labels = useRef<HTMLDivElement>(null)
+  const scroller = useRef<HTMLDivElement>(null)
+  /** Width of the visible part; the song's full width is VISIBLE_SECONDS to this. */
+  const [viewW, setViewW] = useState(1000)
+  const handScrollUntil = useRef(0)
+  const contentW = song ? Math.max(viewW, Math.round((song.duration / VISIBLE_SECONDS) * viewW)) : viewW
+
+  useEffect(() => {
+    const sc = scroller.current
+    if (!sc) return
+    const ro = new ResizeObserver(() => setViewW(sc.clientWidth || 1000))
+    ro.observe(sc)
+    return () => ro.disconnect()
+  }, [song, editing])
+
+  // A new song starts at the left.
+  useEffect(() => {
+    if (scroller.current) scroller.current.scrollLeft = 0
+  }, [song?.id])
+
+  /** Scrolling by hand: a vertical wheel scrolls sideways too, and the view stops following for a moment. */
+  const scrollProps = {
+    onWheel: (e: React.WheelEvent<HTMLDivElement>) => {
+      handScrollUntil.current = performance.now() + HAND_SCROLL_MS
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY
+    },
+    onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
+      // The scrollbar itself.
+      if (e.target === e.currentTarget) handScrollUntil.current = performance.now() + HAND_SCROLL_MS
+    },
+  }
 
   // Static layer: section bands + waveform. Redrawn on resize or song change.
   useEffect(() => {
@@ -44,8 +86,9 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
     const el = wrap.current
     if (!cv || !el) return
     const draw = () => {
-      const dpr = window.devicePixelRatio || 1
       const w = el.clientWidth
+      // A long song makes a wide canvas; keep it within what a canvas can hold.
+      const dpr = Math.min(window.devicePixelRatio || 1, 16000 / Math.max(1, w))
       const h = el.clientHeight
       cv.width = Math.round(w * dpr)
       cv.height = Math.round(h * dpr)
@@ -91,14 +134,24 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
     return () => ro.disconnect()
   }, [song, peaks, version, editing])
 
-  // Playhead + active section highlight run on rAF without re-rendering React.
+  // Playhead + active section highlight run on rAF without re-rendering React. While playing the
+  // view follows the playhead; when stopped, it only moves to show a playhead that jumped out of view.
   useEffect(() => {
     let raf = 0
     let lastIdx = -1
+    let lastPos = -1
     const loop = () => {
       if (song && playhead.current) {
         const pos = engine.position
         playhead.current.style.left = `${(pos / song.duration) * 100}%`
+        const sc = scroller.current
+        const width = wrap.current?.offsetWidth ?? 0
+        if (sc && width > sc.clientWidth + 1 && performance.now() > handScrollUntil.current) {
+          const x = (pos / song.duration) * width
+          const inView = x >= sc.scrollLeft && x <= sc.scrollLeft + sc.clientWidth - 24
+          if (engine.isPlaying || (!inView && pos !== lastPos)) sc.scrollLeft = x - sc.clientWidth * PLAYHEAD_LEAD
+        }
+        lastPos = pos
         const idx = sectionIndexAt(song, pos)
         if (idx !== lastIdx && labels.current) {
           labels.current.querySelectorAll('.section-label').forEach((n, i) => n.classList.toggle('current', i === idx))
@@ -109,7 +162,7 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
-  }, [engine, song, version])
+  }, [engine, song, version, editing])
 
   if (!song) return <div className="timeline empty">No song loaded</div>
 
@@ -124,66 +177,69 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
         <button className="smap-btn smap-add-start" title="Add a section at the playhead" onClick={(e) => showAt(e, addAtPlayhead(song, engine, edit))}>
           <PlusIcon />
         </button>
-        <div
-          className="wave"
-          ref={wrap}
-          onPointerDown={(e) => {
-            if ((e.target as HTMLElement).closest('button')) return
-            e.currentTarget.setPointerCapture(e.pointerId)
-            seekFromEvent(e)
-          }}
-        >
-          <canvas ref={canvas} />
-          <div className="smap-blocks" ref={labels}>
-            {song.sections.map((s, i) => {
-              const left = (s.start / song.duration) * 100
-              const width = ((sectionEnd(song, i) - s.start) / song.duration) * 100
-              const px = ((wrap.current?.clientWidth ?? 1000) * width) / 100
-              const looping = state.loop?.sectionId === s.id ? state.loop.mode : null
-              const menu = sectionMenu(song, i, engine, edit, looping)
-              return (
-                <div
-                  key={s.id}
-                  className={`section-label smap-block ${looping ? 'looping' : ''} ${state.pendingJump?.sectionId === s.id ? 'pending' : ''}`}
-                  style={{ left: `${left}%`, width: `${width}%`, ['--c' as string]: sectionColor(s.name) }}
-                  onContextMenu={(e) => showContextMenu(e, menu)}
-                >
-                  <button
-                    className="smap-badge"
-                    title={`${s.name}: jump here${i < 9 ? ` (${i + 1})` : ''}`}
-                    onClick={() => engine.jumpToSection(s.id, jumpMode)}
+        <div className="tl-scroll" ref={scroller} {...scrollProps}>
+          <div
+            className="wave"
+            ref={wrap}
+            style={{ width: contentW }}
+            onPointerDown={(e) => {
+              if ((e.target as HTMLElement).closest('button')) return
+              e.currentTarget.setPointerCapture(e.pointerId)
+              seekFromEvent(e)
+            }}
+          >
+            <canvas ref={canvas} />
+            <div className="smap-blocks" ref={labels}>
+              {song.sections.map((s, i) => {
+                const left = (s.start / song.duration) * 100
+                const width = ((sectionEnd(song, i) - s.start) / song.duration) * 100
+                const px = (contentW * width) / 100
+                const looping = state.loop?.sectionId === s.id ? state.loop.mode : null
+                const menu = sectionMenu(song, i, engine, edit, looping)
+                return (
+                  <div
+                    key={s.id}
+                    className={`section-label smap-block ${looping ? 'looping' : ''} ${state.pendingJump?.sectionId === s.id ? 'pending' : ''}`}
+                    style={{ left: `${left}%`, width: `${width}%`, ['--c' as string]: sectionColor(s.name) }}
+                    onContextMenu={(e) => showContextMenu(e, menu)}
                   >
-                    {sectionAbbrev(s.name)}
-                  </button>
-                  <button
-                    className={`smap-loop ${looping ? 'on' : ''}`}
-                    title={loopTitle(s.name, looping)}
-                    aria-pressed={!!looping}
-                    onClick={() => engine.cycleLoop(s.id)}
-                  >
-                    {looping === 'forever' ? <LoopForeverIcon /> : <LoopOnceIcon />}
-                  </button>
-                  {px >= FULL_CONTROLS_PX ? (
-                    <>
-                      {song.sections.length > 1 && (
-                        <button className="smap-btn smap-del" title={`Delete ${s.name}`} onClick={() => deleteSection(song, i, edit)}>
-                          <MinusIcon />
-                        </button>
-                      )}
-                      <button className="smap-btn smap-add" title="Add a section after this one" onClick={(e) => showAt(e, insertMenu(song, i, engine, edit))}>
-                        <PlusIcon />
-                      </button>
-                    </>
-                  ) : (
-                    <button className="smap-btn smap-more" title={`${s.name}: more`} onClick={(e) => showAt(e, menu)}>
-                      •••
+                    <button
+                      className="smap-badge"
+                      title={`${s.name}: jump here${i < 9 ? ` (${i + 1})` : ''}`}
+                      onClick={() => engine.jumpToSection(s.id, jumpMode)}
+                    >
+                      {sectionAbbrev(s.name)}
                     </button>
-                  )}
-                </div>
-              )
-            })}
+                    <button
+                      className={`smap-loop ${px < LOOP_ON_TOP_PX ? 'below' : ''} ${looping ? 'on' : ''}`}
+                      title={loopTitle(s.name, looping)}
+                      aria-pressed={!!looping}
+                      onClick={() => engine.cycleLoop(s.id)}
+                    >
+                      {looping === 'forever' ? <LoopForeverIcon /> : <LoopOnceIcon />}
+                    </button>
+                    {px >= FULL_CONTROLS_PX ? (
+                      <>
+                        {song.sections.length > 1 && (
+                          <button className="smap-btn smap-del" title={`Delete ${s.name}`} onClick={() => deleteSection(song, i, edit)}>
+                            <MinusIcon />
+                          </button>
+                        )}
+                        <button className="smap-btn smap-add" title="Add a section after this one" onClick={(e) => showAt(e, insertMenu(song, i, engine, edit))}>
+                          <PlusIcon />
+                        </button>
+                      </>
+                    ) : (
+                      <button className="smap-btn smap-more" title={`${s.name}: more`} onClick={(e) => showAt(e, menu)}>
+                        •••
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            <div className="playhead" ref={playhead} />
           </div>
-          <div className="playhead" ref={playhead} />
         </div>
       </div>
     )
@@ -191,58 +247,62 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
 
   return (
     <div className="timeline">
-      <div className="section-labels" ref={labels}>
-        {song.sections.map((s, i) => {
-          const left = (s.start / song.duration) * 100
-          const width = ((sectionEnd(song, i) - s.start) / song.duration) * 100
-          const looping = state.loop?.sectionId === s.id ? state.loop.mode : null
-          const pending = state.pendingJump?.sectionId === s.id
-          return (
-            <div
-              key={s.id}
-              className={`section-label ${looping ? 'looping' : ''} ${pending ? 'pending' : ''}`}
-              style={{ left: `${left}%`, width: `${width}%`, ['--c' as string]: sectionColor(s.name) }}
-            >
-              <button
-                className="section-jump"
-                onClick={() => engine.jumpToSection(s.id, jumpMode)}
-                title={`Jump to ${s.name}${i < 9 ? ` (${i + 1})` : ''}`}
-                data-abbrev={sectionAbbrev(s.name)}
-              >
-                {/* A narrow section shows its badge abbreviation (V1, Pc) instead of a cut-off name. */}
-                <span className="sj-full">{s.name}</span>
-              </button>
-              <button
-                className={`section-loop ${looping ? 'on' : ''}`}
-                onClick={() => engine.cycleLoop(s.id)}
-                title={loopTitle(s.name, looping)}
-                aria-pressed={!!looping}
-              >
-                {looping === 'forever' ? <LoopForeverIcon /> : <LoopOnceIcon />}
-              </button>
-            </div>
-          )
-        })}
-      </div>
-      <div
-        className="wave"
-        ref={wrap}
-        onPointerDown={(e) => {
-          e.currentTarget.setPointerCapture(e.pointerId)
-          seekFromEvent(e)
-        }}
-      >
-        <canvas ref={canvas} />
-        {state.loop && (
+      <div className="tl-scroll" ref={scroller} {...scrollProps}>
+        <div className="tl-content" style={{ width: contentW }}>
+          <div className="section-labels" ref={labels}>
+            {song.sections.map((s, i) => {
+              const left = (s.start / song.duration) * 100
+              const width = ((sectionEnd(song, i) - s.start) / song.duration) * 100
+              const looping = state.loop?.sectionId === s.id ? state.loop.mode : null
+              const pending = state.pendingJump?.sectionId === s.id
+              return (
+                <div
+                  key={s.id}
+                  className={`section-label ${looping ? 'looping' : ''} ${pending ? 'pending' : ''}`}
+                  style={{ left: `${left}%`, width: `${width}%`, ['--c' as string]: sectionColor(s.name) }}
+                >
+                  <button
+                    className="section-jump"
+                    onClick={() => engine.jumpToSection(s.id, jumpMode)}
+                    title={`Jump to ${s.name}${i < 9 ? ` (${i + 1})` : ''}`}
+                    data-abbrev={sectionAbbrev(s.name)}
+                  >
+                    {/* A narrow section shows its badge abbreviation (V1, Pc) instead of a cut-off name. */}
+                    <span className="sj-full">{s.name}</span>
+                  </button>
+                  <button
+                    className={`section-loop ${looping ? 'on' : ''}`}
+                    onClick={() => engine.cycleLoop(s.id)}
+                    title={loopTitle(s.name, looping)}
+                    aria-pressed={!!looping}
+                  >
+                    {looping === 'forever' ? <LoopForeverIcon /> : <LoopOnceIcon />}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
           <div
-            className="loop-region"
-            style={{
-              left: `${(state.loop.start / song.duration) * 100}%`,
-              width: `${((state.loop.end - state.loop.start) / song.duration) * 100}%`,
+            className="wave"
+            ref={wrap}
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId)
+              seekFromEvent(e)
             }}
-          />
-        )}
-        <div className="playhead" ref={playhead} />
+          >
+            <canvas ref={canvas} />
+            {state.loop && (
+              <div
+                className="loop-region"
+                style={{
+                  left: `${(state.loop.start / song.duration) * 100}%`,
+                  width: `${((state.loop.end - state.loop.start) / song.duration) * 100}%`,
+                }}
+              />
+            )}
+            <div className="playhead" ref={playhead} />
+          </div>
+        </div>
       </div>
     </div>
   )

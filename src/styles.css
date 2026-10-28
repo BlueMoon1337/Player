@@ -357,11 +357,28 @@ button.t-edit.on {
 
 .timeline {
   display: grid;
-  grid-template-rows: 34px 1fr;
+  grid-template-rows: minmax(0, 1fr);
   padding: 8px 14px 10px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   min-height: 0;
+}
+/* The song at Playback's scale: wider than the window, scrolled sideways (and followed while playing). */
+.tl-scroll {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #3a3d45 transparent;
+}
+.tl-content {
+  display: grid;
+  grid-template-rows: 34px minmax(0, 1fr);
+  height: 100%;
+}
+.song-map .tl-scroll .wave {
+  height: 100%;
 }
 .timeline.empty {
   display: grid;
@@ -2476,4 +2493,12 @@ button.smap-btn:hover {
     border-radius: 5px;
     text-overflow: clip;
   }
+}
+
+/* A small section in the song map: its loop button at the bottom left, under the badge. */
+.smap-loop.below {
+  top: auto;
+  right: auto;
+  bottom: 10px;
+  left: 8px;
 }

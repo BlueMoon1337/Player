@@ -21,7 +21,7 @@ A multitrack backing-track player for live worship and band use, in the spirit o
 
 - **Sample-synced stems.** Every stem and click channel is an `AudioBufferSourceNode` started at the same audio-clock time. Loops and jumps restart them all together, so they never drift.
 - **Generated click.** Accent, 1/4, 1/8 and 1/16 channels are rendered from the song's BPM, time signature and click offset, then summed into a Click bus.
-- **Section timeline.** A colour-coded waveform with section markers. Click a section to jump to it, either immediately, at the next bar, or at the end of the section. Each section has its own loop toggle, and you can click the waveform to seek.
+- **Section timeline.** A colour-coded waveform with section markers, at Playback's scale: about a minute of the song across the window, scrolled sideways (wheel, trackpad or scrollbar) and following the playhead while it plays. Click a section to jump to it, either immediately, at the next bar, or at the end of the section. Each section has its own loop toggle, and you can click the waveform to seek.
 - **Transport Area**, laid out like Playback's. From left to right:
   - **Tempo and time signature** of the loaded song (blank when no song is loaded).
   - **Time display:** where the song is now, large, with its start / end points underneath.
