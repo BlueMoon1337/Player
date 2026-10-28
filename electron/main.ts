@@ -23,6 +23,10 @@ import { Library, assertFileName, assertId } from './library'
 import * as updates from './updates'
 import { AUDIO_EXTENSIONS, importPaths } from './importer'
 import { importPads } from './pads'
+import { CUE_LANGUAGES, type CueLanguage, cleanPhrase, renderCues } from './cues'
+
+/** Where spoken cues are kept: they're made by this computer's voices, so not in the library. */
+const cuesRoot = () => path.join(app.getPath('userData'), 'cues')
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL
 const RENDERER_DIR = path.join(__dirname, '..', 'dist')
@@ -89,6 +93,14 @@ function registerAppProtocol() {
     const headers: Record<string, string> = {}
     let file: string
     const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
+    if (parts[0] === 'cues') {
+      // Spoken cues made by cues.ts: app://player/cues/<language>/<file>.wav
+      if (parts.length !== 3 || !(CUE_LANGUAGES as readonly string[]).includes(parts[1]) || !/^[0-9a-f]{20}\.wav$/.test(parts[2])) {
+        return new Response('Forbidden', { status: 403 })
+      }
+      if (DEV_URL) headers['Access-Control-Allow-Origin'] = new URL(DEV_URL).origin
+      return streamFile(path.join(cuesRoot(), parts[1], parts[2]), headers)
+    }
     if (parts[0] === 'media' || parts[0] === 'pads') {
       try {
         if (parts.length !== 3) throw new Error('bad path')
@@ -408,6 +420,13 @@ function registerIpc() {
   })
 
   handle('library:save', (rec: SongRecord) => library.saveSong(rec))
+
+  handle('cues:render', async (lang: unknown, phrases: unknown) => {
+    if (!(CUE_LANGUAGES as readonly unknown[]).includes(lang)) throw new Error('Unknown cue language')
+    if (!Array.isArray(phrases) || phrases.length > 200) throw new Error('Expected a list of phrases')
+    const list = [...new Set(phrases.map(cleanPhrase).filter((p): p is string => !!p))]
+    return renderCues(cuesRoot(), lang as CueLanguage, list)
+  })
 
   handle('pads:list', () => library.listPads())
   handle('pads:import', async () => {

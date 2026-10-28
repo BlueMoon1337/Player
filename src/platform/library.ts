@@ -29,6 +29,7 @@ export function recordFromSong(song: Song): SongRecord {
     stems,
     artwork,
     clickStem: song.clickStem ?? null,
+    pad: song.pad,
   }
 }
 
@@ -49,6 +50,7 @@ export function songFromRecord(rec: SongRecord): Song {
     stems: [],
     stemFiles: rec.stems,
     clickStem: rec.clickStem ?? null,
+    pad: typeof rec.pad === 'string' ? rec.pad : undefined,
     artwork: rec.artwork ? mediaUrl(rec.id, rec.artwork) : songArtwork(rec.title),
     source: 'library',
   }

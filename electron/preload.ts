@@ -21,6 +21,9 @@ const api: DesktopAPI = {
     saveState: (state) => ipcRenderer.invoke('library:save-state', state),
     reveal: (songId) => ipcRenderer.invoke('library:reveal', songId),
   },
+  cues: {
+    render: (lang, phrases) => ipcRenderer.invoke('cues:render', lang, phrases),
+  },
   pads: {
     list: () => ipcRenderer.invoke('pads:list'),
     import: () => ipcRenderer.invoke('pads:import'),

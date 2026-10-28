@@ -12,6 +12,7 @@ import {
   uid,
 } from '../audio/types'
 import { UNDO_KEY, showNote } from '../library/history'
+import { getSettings, useSettings } from '../settings'
 import { type MenuEntry, type MenuItem, promptDialog, showContextMenu } from './Ask'
 import { LoopForeverIcon, LoopOnceIcon } from './LoopIcons'
 
@@ -50,6 +51,7 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
   const playhead = useRef<HTMLDivElement>(null)
   const labels = useRef<HTMLDivElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
+  const grid = useSettings().waveformGrid
   /** Width of the visible part; the song's full width is VISIBLE_SECONDS to this. */
   const [viewW, setViewW] = useState(1000)
   const handScrollUntil = useRef(0)
@@ -127,12 +129,13 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
           }
         })
       }
+      if (grid) drawGrid(g, song, w, h, 0.16)
     }
     draw()
     const ro = new ResizeObserver(draw)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [song, peaks, version, editing])
+  }, [song, peaks, version, editing, grid])
 
   // Playhead + active section highlight run on rAF without re-rendering React. While playing the
   // view follows the playhead; when stopped, it only moves to show a playhead that jumped out of view.
@@ -140,7 +143,14 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
     let raf = 0
     let lastIdx = -1
     let lastPos = -1
-    const loop = () => {
+    let lastDraw = 0
+    const loop = (now: number) => {
+      // Power Saver: the playhead and scrolling update ten times a second instead of every frame.
+      if (getSettings().powerSaver && now - lastDraw < 100) {
+        raf = requestAnimationFrame(loop)
+        return
+      }
+      lastDraw = now
       if (song && playhead.current) {
         const pos = engine.position
         playhead.current.style.left = `${(pos / song.duration) * 100}%`
@@ -311,10 +321,22 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
 // --------------------------------------------------------------- song map
 
 /** Edit mode's look: a pale waveform over bar lines; the section blocks are drawn as elements on top. */
-function drawSongMap(g: CanvasRenderingContext2D, song: Song, peaks: Float32Array | null, w: number, h: number) {
+/** Waveform Grid: a line on every bar, fainter ones on the beats (when they're far enough apart). */
+function drawGrid(g: CanvasRenderingContext2D, song: Song, w: number, h: number, barAlpha: number) {
   const bar = barLength(song)
-  g.fillStyle = 'rgba(255, 255, 255, 0.07)'
-  for (let t = song.clickOffset % bar; t < song.duration; t += bar) g.fillRect(Math.round((t / song.duration) * w), 0, 1, h)
+  const beat = bar / song.timeSig[0]
+  const pxPerBeat = (beat / song.duration) * w
+  let n = Math.ceil(-song.clickOffset / beat)
+  for (let t = song.clickOffset + n * beat; t < song.duration; t += beat, n++) {
+    const isBar = ((n % song.timeSig[0]) + song.timeSig[0]) % song.timeSig[0] === 0
+    if (!isBar && pxPerBeat < 6) continue
+    g.fillStyle = `rgba(255, 255, 255, ${isBar ? barAlpha : barAlpha / 2.5})`
+    g.fillRect(Math.round((t / song.duration) * w), 0, 1, h)
+  }
+}
+
+function drawSongMap(g: CanvasRenderingContext2D, song: Song, peaks: Float32Array | null, w: number, h: number) {
+  if (getSettings().waveformGrid) drawGrid(g, song, w, h, 0.09)
   if (!peaks) return
   const mid = h / 2
   g.fillStyle = 'rgba(228, 228, 231, 0.72)'
@@ -334,7 +356,9 @@ const showAt = (e: React.MouseEvent<HTMLElement>, items: MenuEntry[]) => {
 }
 
 /** Snaps a time to the nearest bar line of the song's click grid. */
+/** Section edits snap to the nearest bar, while the Waveform Grid is on. */
 function snapToBar(song: Song, t: number) {
+  if (!getSettings().waveformGrid) return Math.max(0, t)
   const bar = barLength(song)
   return Math.max(0, song.clickOffset + Math.round((t - song.clickOffset) / bar) * bar)
 }

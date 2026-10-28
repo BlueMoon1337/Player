@@ -34,6 +34,8 @@ export interface Song {
   sections: Section[]
   /** The song's own sections (from import; saved with the song), before any setlist's edits. */
   librarySections?: Section[]
+  /** The pad sound for this song (Song Settings); otherwise the Default Ambient Pad. */
+  pad?: string
   /** Audio stems. Empty until the song is loaded (demo and library songs load lazily). */
   stems: Stem[]
   /** Library stem files, kept while `stems` is unloaded so the song can be reloaded from disk. */
@@ -54,6 +56,8 @@ export const CLICK_CHANNELS = [
   { id: 'q', name: '1/4' },
   { id: 'e', name: '1/8' },
   { id: 's', name: '1/16' },
+  // Spoken section cues (Settings ▸ Guide Cue Language), made by the desktop app.
+  { id: 'cues', name: 'Cues' },
 ] as const
 
 export type ClickChannelId = (typeof CLICK_CHANNELS)[number]['id']
@@ -103,6 +107,11 @@ export interface ChannelSettings {
   mute: boolean
   solo: boolean
   bus: Bus
+}
+
+/** A stem that's the original recording, for reference (Settings ▸ Reference Track). */
+export function isReferenceName(name: string): boolean {
+  return /^(ref|reference|reference mix|ref mix|original|original mix|full mix)( \d+)?$/i.test(name.trim())
 }
 
 /** The bus a stem is grouped under in the Buses view: "EG 1" and "EG 2" → "EG", "Drums (Live)" → "Drums". */

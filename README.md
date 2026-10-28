@@ -64,8 +64,18 @@ A multitrack backing-track player for live worship and band use, in the spirit o
   - **Repeat until turned off** (∞) loops that section until you turn it off.
 
   Each section on the timeline has the same loop button: click it once to repeat the section once, twice to repeat it until turned off, and a third time to stop. The keyboard does the same with **⇧L** and **L**.
-- **Outputs** (View ▸ Outputs…, Settings, or a strip's right-click menu) chooses the audio device and each channel's output.
-- **AutoLink every song** (Settings) makes AutoLink the default for every song whose card still says Cue Next Song.
+- **Settings** (the ≡ button), laid out like Playback's, with **General**, **Outputs** and **About** tabs. General has:
+  - **Auto Pan:** click and guide out the left output, everything else out the right (for a stereo output).
+  - **Click Sound:** Classic, Woodblock, Hi-Hat or Beep. A song's own Click Track is chosen in Song Settings ▸ Click.
+  - **Guide Cue Language** (desktop app): spoken section cues a bar before each section, in English (female or male), Spanish, Portuguese or French, made with the computer's own voices (`say` on a Mac, the Windows speech voices, espeak-ng on Linux) and kept for next time. They play on the **Cues** strip in the click group. Off by default, as a MultiTracks Guide track already speaks them.
+  - **Count Into Each Section:** the cue counts the rest of that bar: "Chorus, two, three, four".
+  - **Song Section Pre-roll:** playing from the start of a section starts a bar early, the click counting in and the tracks fading up to the downbeat.
+  - **Song Specific Buses** and **Song Specific Master Fader:** bus levels (with mute and solo) and the master level kept per song instead of for all songs.
+  - **Reference Track:** shows a song's original mix (a track named Reference or Original); off hides and silences it.
+  - **Default Ambient Pad:** the pad for songs that don't choose their own in Song Settings ▸ Pad.
+  - **Audio Device**, **Waveform Grid** (bar and beat lines, and section edits snapping to bars), **Metronome Style VU** (the click meters flash on the beat), **Fader Default Level 80%** (a new song's faders start at 80% of the way to unity, about −4.7 dB), **Power Saver** (no meters; the playhead and scrolling update ten times a second), **MIDI Out**, and **Start Pad Player with Songs**.
+  - Also Section Jumps, Fade Length and **AutoLink Every Song** (songs set to Cue Next Song start the next one straight away).
+- **Outputs** (Settings ▸ Outputs, View ▸ Outputs…, or a strip's right-click menu) chooses the audio device and each channel's output.
 - **Importing songs.** Use **Import songs**, **File ▸ Import Songs…** (⌘/Ctrl+I) or **Import Folder…** (⇧⌘/Ctrl+Shift+I), or drop files on the window. You can import several at once:
   - **MultiTracks.com zips** (e.g. `Goodness of God-Victory-Ab-63.00bpm.zip`), and the folders they unzip to. Each becomes a song:
     - Title, album, key and BPM come from the name. Add the artist in Song Settings.

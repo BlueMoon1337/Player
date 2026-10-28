@@ -3,6 +3,7 @@ import { type Engine, type EngineState, type GroupSettings, type LoopMode, fader
 import { PAD_SOUNDS, type ImportedPad, type PadPlayer } from '../audio/pad'
 import { type Bus, type ChannelSettings, type Song, busLabel, busOptions, sectionIndexAt } from '../audio/types'
 import { type MenuEntry, showContextMenu } from './Ask'
+import { getSettings, useSettings } from '../settings'
 import { Fader } from './Fader'
 import { LoopForeverIcon, LoopOnceIcon } from './LoopIcons'
 
@@ -26,8 +27,10 @@ interface Props {
   /** The pad follows the loaded song's key (in the sound menu). */
   padFollow: boolean
   setPadFollow: (v: boolean) => void
-  /** The chosen pad sound: a built-in one's id, or an imported pad's. */
+  /** The Default Ambient Pad: a built-in sound's id, or an imported pad's. */
   padSound: string
+  /** The loaded song's own pad (Song Settings), which plays instead of the default. */
+  songPad?: string
   setPadSound: (id: string) => void
   importedPads: ImportedPad[]
   /** IMPORT: pads from zips of WAV files. */
@@ -46,14 +49,37 @@ const PAD_ROWS = [
 type Meter = () => number
 
 /** Drives every meter on screen from one animation loop: fast attack, slow release. */
+/**
+ * A click channel's meter: its level, or with Metronome Style VU, a flash on its beats (the
+ * accent on the downbeat, 1/4 on the other beats, 1/8 and 1/16 on theirs, the click on every beat).
+ */
+function clickMeter(engine: Engine, id: string): number {
+  if (!getSettings().metronomeVU) return engine.meter(id)
+  const song = engine.currentSong
+  if (!song || !engine.isPlaying) return 0
+  const beat = 60 / song.bpm
+  const per = id === 'e' ? 2 : id === 's' ? 4 : 1
+  const rel = ((engine.position - song.clickOffset) / beat) * per
+  const n = Math.floor(rel + 1e-6)
+  const since = ((rel - n) * beat) / per
+  const inBar = (((Math.floor((n + 1e-6) / per)) % song.timeSig[0]) + song.timeSig[0]) % song.timeSig[0]
+  const onBeat = n % per === 0
+  if (id === 'accent' && !(onBeat && inBar === 0)) return 0
+  if (id === 'q' && !(onBeat && inBar !== 0)) return 0
+  if ((id === 'e' || id === 's') && onBeat) return 0
+  return Math.exp(-since * 14)
+}
+
 function useMeters() {
   const els = useRef(new Map<HTMLDivElement, Meter>())
   useEffect(() => {
     let raf = 0
     const levels = new WeakMap<HTMLDivElement, number>()
     const loop = () => {
+      // Power Saver: no meters.
+      const off = getSettings().powerSaver
       for (const [el, read] of els.current) {
-        const peak = Math.min(1, read())
+        const peak = off ? 0 : Math.min(1, read())
         const prev = levels.get(el) ?? 0
         const lvl = peak > prev ? peak : prev * 0.9
         levels.set(el, lvl)
@@ -134,6 +160,7 @@ const shortRoute = (bus: Bus) => (bus === 'main' ? undefined : busLabel(bus).rep
 
 export function Mixer(p: Props) {
   const { engine, state, song, view, setView, pad } = p
+  const settings = useSettings()
   const meter = useMeters()
   const [clickOpen, setClickOpen] = useState(false)
   const [openBuses, setOpenBuses] = useState<Set<string>>(new Set())
@@ -163,7 +190,7 @@ export function Mixer(p: Props) {
         onVolume={(v) => set({ volume: v })}
         onMute={() => set({ mute: !s.mute })}
         onSolo={() => set({ solo: !s.solo })}
-        meter={meter(() => engine.meter(c.id))}
+        meter={meter(c.group === 'click' && c.id !== 'cues' ? () => clickMeter(engine, c.id) : () => engine.meter(c.id))}
         route={routable ? shortRoute(s.bus) : undefined}
         menu={() => [
           { label: s.mute ? 'Unmute' : 'Mute', onClick: () => set({ mute: !s.mute }) },
@@ -179,8 +206,11 @@ export function Mixer(p: Props) {
   // A song playing its own click stem shows that instead of the generated click's parts.
   const generated = new Set(['accent', 'q', 'e', 's'])
   const clickBus = state.channels.find((c) => c.id === 'click')
-  const clickParts = state.channels.filter((c) => c.group === 'click' && c.id !== 'click' && !(state.audioClick && generated.has(c.id)))
-  const stems = state.channels.filter((c) => c.group === 'stem')
+  // The Cues strip shows while there are spoken cues; a reference track only with Reference Track on.
+  const clickParts = state.channels.filter(
+    (c) => c.group === 'click' && c.id !== 'click' && !(state.audioClick && generated.has(c.id)) && (c.id !== 'cues' || state.cues),
+  )
+  const stems = state.channels.filter((c) => c.group === 'stem' && (settings.referenceTrack || !c.reference))
   const empty = <div className="empty">{engine.currentSong ? 'Loading stems…' : 'No song loaded'}</div>
 
   const clickStrip = clickBus && (
@@ -194,8 +224,10 @@ export function Mixer(p: Props) {
 
   let main: JSX.Element
   if (view === 'pad') {
-    const builtIn = PAD_SOUNDS.find((s) => s.id === p.padSound)
-    const imported = p.importedPads.find((x) => x.id === p.padSound)
+    // The card shows what plays: the song's own pad if it has one, else the default.
+    const playing = p.songPad ?? p.padSound
+    const builtIn = PAD_SOUNDS.find((s) => s.id === playing)
+    const imported = p.importedPads.find((x) => x.id === playing)
     const sound = imported
       ? {
           name: imported.name,
@@ -203,6 +235,7 @@ export function Mixer(p: Props) {
           hue: [...imported.name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7),
         }
       : { name: (builtIn ?? PAD_SOUNDS[0]).name, by: 'Player', hue: (builtIn ?? PAD_SOUNDS[0]).hue }
+    if (p.songPad) sound.by = `This song’s pad (Song Settings) · ${sound.by}`
     const soundMenu = (): MenuEntry[] => {
       const item = (id: string, name: string): MenuEntry => ({
         label: `${id === p.padSound ? '✓ ' : ''}${name}`,
@@ -294,7 +327,9 @@ export function Mixer(p: Props) {
           <div className="strip-group stem-group">
             {state.groups.map((g) => {
               const open = openBuses.has(g.name)
-              const members = g.members.map((id) => state.channels.find((c) => c.id === id)!).filter(Boolean)
+              const members = g.members
+                .map((id) => state.channels.find((c) => c.id === id)!)
+                .filter((c) => c && (settings.referenceTrack || !c.reference))
               const routes = new Set(members.map((c) => c.settings.bus))
               const route = routes.size === 1 ? [...routes][0] : null
               return (
@@ -392,7 +427,14 @@ export function Mixer(p: Props) {
         <button
           className={engine.midiMuted ? 'warn' : ''}
           onClick={() => engine.setMidiMuted(!engine.midiMuted)}
-          title={engine.midiAvailable ? 'Stop sending MIDI start/stop/program changes' : 'No MIDI outputs detected'}
+          disabled={!state.midiOut}
+          title={
+            !state.midiOut
+              ? 'MIDI Out is off in Settings'
+              : engine.midiAvailable
+                ? 'Stop sending MIDI start/stop/program changes'
+                : 'No MIDI outputs detected'
+          }
           aria-pressed={engine.midiMuted}
         >
           Mute MIDI

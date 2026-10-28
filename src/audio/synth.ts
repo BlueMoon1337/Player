@@ -13,12 +13,48 @@ export interface ClickBuffers {
 
 const CLICK_SAMPLE_RATE = 16000
 
-/** One click sound (a short decaying sine burst), rendered once and stamped in for every beat. */
-function clickTemplate(sr: number, freq: number, amp: number): Float32Array {
-  const out = new Float32Array(Math.floor(sr * 0.035))
+/** The built-in click sounds (Settings ▸ Click Sound). */
+export type ClickSoundName = 'classic' | 'woodblock' | 'hihat' | 'beep'
+
+/** A seeded noise source, so a click sounds the same every time it's rendered. */
+function noise(seed: number) {
+  let x = seed
+  return () => {
+    x = (x * 1664525 + 1013904223) >>> 0
+    return x / 2 ** 31 - 1
+  }
+}
+
+/**
+ * One click (rendered once and stamped in for every beat). `freq` sets the pitch of the beat it
+ * marks, accent highest: a sine burst (classic), a pitched knock (woodblock), a short noise tick
+ * (hi-hat) or a square beep.
+ */
+function clickTemplate(sr: number, freq: number, amp: number, sound: ClickSoundName = 'classic'): Float32Array {
+  const len = { classic: 0.035, woodblock: 0.05, hihat: 0.03, beep: 0.06 }[sound]
+  const out = new Float32Array(Math.floor(sr * len))
+  const rnd = noise(Math.round(freq))
+  let hp = 0
+  let prev = 0
   for (let i = 0; i < out.length; i++) {
     const t = i / sr
-    out[i] = amp * Math.exp(-t * 140) * Math.min(1, i / 8) * Math.sin(2 * Math.PI * freq * t)
+    const attack = Math.min(1, i / 8)
+    if (sound === 'woodblock') {
+      // Two inharmonic partials, a hard attack and a fast decay, like a wooden knock.
+      const f = freq * 0.9
+      out[i] = amp * attack * Math.exp(-t * 90) * (Math.sin(2 * Math.PI * f * t) * 0.7 + Math.sin(2 * Math.PI * f * 2.76 * t) * 0.3)
+    } else if (sound === 'hihat') {
+      // High-passed noise: brighter on the accent.
+      const n = rnd()
+      hp = 0.85 * (hp + n - prev)
+      prev = n
+      out[i] = amp * 1.3 * attack * Math.exp(-t * (freq > 1500 ? 110 : 160)) * hp
+    } else if (sound === 'beep') {
+      const sq = Math.sin(2 * Math.PI * freq * t) >= 0 ? 1 : -1
+      out[i] = amp * 0.45 * attack * (t < len - 0.01 ? 1 : Math.max(0, (len - t) / 0.01)) * sq
+    } else {
+      out[i] = amp * Math.exp(-t * 140) * attack * Math.sin(2 * Math.PI * freq * t)
+    }
   }
   return out
 }
@@ -34,7 +70,7 @@ function writeClick(data: Float32Array, at: number, sr: number, tpl: Float32Arra
  * Renders the click as four sample-accurate buffers (one per click channel) so they
  * can be started alongside the stems and stay locked to them, including through loops.
  */
-export function renderClick(ctx: BaseAudioContext, song: Song): ClickBuffers {
+export function renderClick(ctx: BaseAudioContext, song: Song, sound: ClickSoundName = 'classic'): ClickBuffers {
   // Clicks are tones of at most 1.65 kHz, so 16 kHz is plenty. Playback resamples them and
   // positions loops in fractional frames, so they stay locked to stems at any device rate,
   // at a third of the memory a full-rate render would take for a long song.
@@ -48,10 +84,10 @@ export function renderClick(ctx: BaseAudioContext, song: Song): ClickBuffers {
   const q = bufs.q.getChannelData(0)
   const e = bufs.e.getChannelData(0)
   const s = bufs.s.getChannelData(0)
-  const accentTpl = clickTemplate(sr, 1650, 0.9)
-  const quarterTpl = clickTemplate(sr, 1050, 0.75)
-  const eighthTpl = clickTemplate(sr, 880, 0.5)
-  const sixteenthTpl = clickTemplate(sr, 720, 0.35)
+  const accentTpl = clickTemplate(sr, 1650, 0.9, sound)
+  const quarterTpl = clickTemplate(sr, 1050, 0.75, sound)
+  const eighthTpl = clickTemplate(sr, 880, 0.5, sound)
+  const sixteenthTpl = clickTemplate(sr, 720, 0.35, sound)
   // Beats before the click offset are allowed so pickups get a click too.
   let n = -Math.floor(song.clickOffset / beat)
   for (;;) {

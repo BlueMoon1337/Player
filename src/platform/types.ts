@@ -23,6 +23,8 @@ export interface SongRecord {
   artwork?: string
   /** The stem used as the click (a MultiTracks "Click Track"); otherwise the click is generated. */
   clickStem?: string | null
+  /** The song's own pad sound; otherwise the Default Ambient Pad. */
+  pad?: string
 }
 
 /** An imported pad, as saved in `<library>/Pads/<id>/pad.json` next to its WAVs. */
@@ -169,6 +171,10 @@ export interface DesktopAPI {
     /** Opens the library folder, or a song's folder, in the file manager. */
     reveal(songId?: string): Promise<void>
   }
+  cues: {
+    /** Makes spoken cues in a language's voice; resolves to each phrase's file (see cueUrl). */
+    render(lang: string, phrases: string[]): Promise<Record<string, string>>
+  }
   pads: {
     list(): Promise<PadRecord[]>
     /** Asks for pad zips (or WAVs) and imports them; each zip is one pad. */
@@ -192,6 +198,11 @@ export interface DesktopAPI {
     onProgress(cb: (p: { received: number; total: number | null }) => void): () => void
   }
   onMenu(cb: (cmd: MenuCommand) => void): () => void
+}
+
+/** URL of a spoken cue made by the main process. */
+export function cueUrl(lang: string, file: string): string {
+  return `app://player/cues/${encodeURIComponent(lang)}/${encodeURIComponent(file)}`
 }
 
 /** URL the renderer fetches an imported pad's WAV from (served by the main process). */

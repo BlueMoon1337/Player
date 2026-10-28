@@ -7,7 +7,8 @@ import { renderDemoStems } from './audio/synth'
 import { type Song, keyRoot, sectionIndexAt } from './audio/types'
 import { AskHost, ContextMenuHost, confirmDelete, isAsking } from './components/Ask'
 import { type LowerView, Mixer } from './components/Mixer'
-import { Menu, OutputsDialog, SongSettingsDialog } from './components/Panels'
+import { OutputsDialog, SongSettingsDialog } from './components/Panels'
+import { SettingsDialog } from './components/SettingsDialog'
 import { Setlist } from './components/Setlist'
 import { LibraryPicker } from './components/LibraryPicker'
 import { SetlistsMenu } from './components/SetlistsMenu'
@@ -33,7 +34,10 @@ import {
   useLibrary,
 } from './library/store'
 import { type MenuCommand, desktop } from './platform'
-import { type PadRecord, type SongEndSetting, padUrl } from './platform/types'
+import { useSettings } from './settings'
+import { renderCues, songCuePhrases } from './audio/cues'
+import { decodeAudio } from './audio/decoder'
+import { type PadRecord, type SongEndSetting, cueUrl, padUrl } from './platform/types'
 import { type LibraryImport, importIntoLibrary, loadSongStems, recordFromSong } from './platform/library'
 import { PAD_FILE, keyFromFileName, padNameFromFiles } from './import/pads'
 import { readZipPad, readZipSong } from './import/webZip'
@@ -100,6 +104,7 @@ const inTextField = (el: Element | null) => !!el?.closest('input, select, textar
 export default function App() {
   const state = useSyncExternalStore(engine.subscribe, engine.getState)
   const lib = useLibrary()
+  const settings = useSettings()
   const history = useHistory()
   const setlist = lib.ready ? currentSetlist(lib) : null
   // The main window plays the current setlist.
@@ -133,7 +138,11 @@ export default function App() {
   const [padSound, setPadSoundState] = useState(initial.padSound)
   /** The pad comes on, in the song's key, when a song starts. */
   const [autoPad, setAutoPad] = useState(initial.autoPad)
-  const [importedPads, setImportedPads] = useState<ImportedPad[]>([])
+  const [importedPads, setImportedPadsState] = useState<ImportedPad[]>([])
+  const setImportedPads = (pads: ImportedPad[]) => {
+    importedPadsRef.current = pads
+    setImportedPadsState(pads)
+  }
   const padPicker = useRef<HTMLInputElement>(null)
   const peaks = useRef(new Map<string, Float32Array>())
   const saveTimers = useRef(new Map<string, number>())
@@ -148,10 +157,14 @@ export default function App() {
     }
   }, [jumpMode, fadeSeconds, link, padSound, autoPad])
 
+  /** The Default Ambient Pad (Pad Player menu, Settings): what plays unless the song has its own. */
   const setPadSound = (id: string) => {
     setPadSoundState(id)
-    pad.setSound(id)
+    const own = engine.currentSong?.pad
+    pad.setSound(own && padKnown(own) ? own : id)
   }
+  const padKnown = (id: string) => PAD_SOUNDS.some((s) => s.id === id) || importedPadsRef.current.some((x) => x.id === id)
+  const importedPadsRef = useRef<ImportedPad[]>([])
 
   // Imported pads: on desktop, the ones saved in the library folder. The saved choice of sound
   // applies once they're known (it may be one of them).
@@ -226,6 +239,11 @@ export default function App() {
     addPads(pads, failed)
   }
 
+  const padChoices = useMemo(() => {
+    const list = [...PAD_SOUNDS.map((s) => ({ id: s.id, name: s.name })), ...importedPads.map((x) => ({ id: x.id, name: x.name }))]
+    return { list, defaultName: list.find((x) => x.id === padSound)?.name ?? PAD_SOUNDS[0].name }
+  }, [importedPads, padSound])
+
   const deletePad = async (x: ImportedPad) => {
     const ok = await confirmDelete({ title: `Delete the pad “${x.name}”?`, message: 'Its WAV files go to the trash.' }, `The pad “${x.name}”`)
     if (!ok || !desktop) return
@@ -274,6 +292,18 @@ export default function App() {
     loadLibrary().catch((e: Error) => setNotice({ kind: 'error', text: `Couldn't open the song library: ${e.message}` }))
   }, [])
 
+  // Settings ▸ General: the parts the audio engine applies.
+  useEffect(() => {
+    engine.setAutoPan(settings.autoPan)
+    engine.setClickSound(settings.clickSound)
+    engine.setSongSpecificBuses(settings.songSpecificBuses)
+    engine.setSongSpecificMaster(settings.songSpecificMaster)
+    engine.setReferenceVisible(settings.referenceTrack)
+    engine.setFaderDefault80(settings.faderDefault80)
+    engine.setMidiOut(settings.midiOut)
+    engine.sectionPreroll = settings.sectionPreroll
+  }, [settings])
+
   // Desktop: keep the display awake and guard quitting while audio runs.
   useEffect(() => {
     desktop?.setActive(state.playing || padOn)
@@ -317,6 +347,49 @@ export default function App() {
     if (!padOn) setPadOn(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.playing, song?.id])
+
+  // A song with its own pad (Song Settings) plays that; otherwise the Default Ambient Pad.
+  useEffect(() => {
+    const own = song?.pad
+    pad.setSound(own && padKnown(own) ? own : padSound)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [song?.id, song?.pad, padSound, importedPads, version])
+
+  // Spoken section cues (Guide Cue Language, Count Into Each Section): made by the desktop app's
+  // voices for the loaded song, and again when its sections or tempo change.
+  const cueSamples = useRef(new Map<string, AudioBuffer>())
+  useEffect(() => {
+    const lang = settings.cueLanguage
+    if (!song || lang === 'off' || !desktop) return void engine.setCues(null)
+    let stale = false
+    const countIn = settings.countIntoSections
+    const phrases = songCuePhrases(song, lang, countIn)
+    void (async () => {
+      try {
+        const files = await desktop!.cues.render(lang, phrases)
+        const samples = new Map<string, AudioBuffer>()
+        for (const p of phrases) {
+          const key = `${lang}\n${p}`
+          let buf = cueSamples.current.get(key)
+          if (!buf && files[p]) {
+            buf = (await decodeAudio(engine.ctx, cueUrl(lang, files[p]))).buffer
+            cueSamples.current.set(key, buf)
+          }
+          if (buf) samples.set(p, buf)
+        }
+        if (!stale && engine.currentSong === song) engine.setCues(renderCues(engine.ctx, song, lang, countIn, samples))
+      } catch (e) {
+        if (stale) return
+        engine.setCues(null)
+        const why = (e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+        setNotice({ kind: 'warn', text: `Couldn't make spoken cues: ${why}` })
+      }
+    })()
+    return () => {
+      stale = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [song, currentId, version, settings.cueLanguage, settings.countIntoSections])
 
   /** Stem loads under way (or done), so a preload and a selection never decode the same song twice. */
   const stemLoads = useRef(new Map<string, Promise<void>>())
@@ -780,6 +853,7 @@ export default function App() {
           }}
           onOutputs={() => setOutputsOpen(true)}
           padSound={padSound}
+          songPad={song?.pad && padChoices.list.some((x) => x.id === song.pad) ? song.pad : undefined}
           setPadSound={setPadSound}
           importedPads={importedPads}
           onImportPads={() => void importPads()}
@@ -818,17 +892,21 @@ export default function App() {
           song={lib.songs[settingsFor]}
           loaded={settingsFor === currentId}
           edit={(label, change, field) => editSong(lib.songs[settingsFor], label, change, field)}
+          pads={padChoices}
           onClose={() => setSettingsFor(null)}
         />
       )}
       {menuOpen && (
-        <Menu
+        <SettingsDialog
+          engine={engine}
+          state={state}
+          pads={padChoices.list}
+          defaultPad={padSound}
+          setDefaultPad={setPadSound}
+          autoPad={autoPad}
+          setAutoPad={setAutoPad}
           link={link}
           setLink={setLink}
-          onOutputs={() => {
-            setMenuOpen(false)
-            setOutputsOpen(true)
-          }}
           jumpMode={jumpMode}
           setJumpMode={setJumpMode}
           fadeSeconds={fadeSeconds}

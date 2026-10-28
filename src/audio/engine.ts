@@ -1,4 +1,4 @@
-import { barLength, renderClick } from './synth'
+import { type ClickSoundName, barLength, renderClick } from './synth'
 import {
   type Bus,
   type ChannelSettings,
@@ -6,6 +6,7 @@ import {
   type Song,
   busGroupName,
   busTopChannel,
+  isReferenceName,
   normalizeBus,
   parseBus,
   sectionEnd,
@@ -67,7 +68,19 @@ export interface EngineState {
   pendingJump: PendingJump | null
   /** A fade in progress: in (from Fade while stopped) or out (Fade while playing). */
   fade: 'in' | 'out' | null
-  channels: { id: string; name: string; group: 'click' | 'stem'; busGroup: string | null; settings: ChannelSettings }[]
+  channels: {
+    id: string
+    name: string
+    group: 'click' | 'stem'
+    busGroup: string | null
+    /** The song's reference (original) recording. */
+    reference: boolean
+    settings: ChannelSettings
+  }[]
+  /** Spoken section cues are made for the loaded song. */
+  cues: boolean
+  /** Settings ▸ MIDI Out. */
+  midiOut: boolean
   /** The loaded song's buses (stems grouped by name), in mixer order. */
   groups: { name: string; settings: GroupSettings; members: string[] }[]
   masterVolume: number
@@ -151,8 +164,20 @@ export class Engine {
   private state: EngineState
   private tickTimer: number
   private midi: MIDIOutput[] = []
+  private midiStarted = false
+  private midiOut = false
   midiMuted = false
   fadeSeconds = 4
+  // Settings ▸ General (set from the app's settings).
+  private autoPan = false
+  private clickSound: ClickSoundName = 'classic'
+  private songBuses = false
+  private songMaster = false
+  private hideReference = false
+  /** A song's channels start here when they have no saved level (Fader Default Level 80%). */
+  private defaultVolume = 0.75
+  /** Playing from the start of a section gives a bar of count-in with the tracks fading in. */
+  sectionPreroll = false
 
   /** `ctx` is injectable so tests can render the graph offline with any channel count. */
   constructor(ctx?: AudioContext) {
@@ -170,7 +195,96 @@ export class Engine {
       this.configureOutputs()
       this.emit()
     })
-    this.initMidi()
+  }
+
+  // ---------------------------------------------------------------- settings
+
+  /** Auto Pan: click and guide out the left output (1), everything else out the right (2). */
+  setAutoPan(on: boolean) {
+    if (on === this.autoPan) return
+    this.autoPan = on
+    for (const ch of this.channels.values()) this.route(ch)
+    this.emit()
+  }
+
+  setClickSound(sound: ClickSoundName) {
+    if (sound === this.clickSound) return
+    this.clickSound = sound
+    this.regenerateClick()
+  }
+
+  /** The spoken cues for the loaded song (null: none). */
+  setCues(buffer: AudioBuffer | null) {
+    const ch = this.channels.get('cues')!
+    if (ch.buffer === buffer) return
+    ch.buffer = buffer
+    if (this.playing) this.seek(this.position)
+    this.emit()
+  }
+
+  /** Song Specific Buses: bus levels, mutes and solos kept per song rather than for all songs. */
+  setSongSpecificBuses(on: boolean) {
+    if (on === this.songBuses) return
+    this.songBuses = on
+    this.reloadGroups()
+    this.emit()
+  }
+
+  /** Song Specific Master Fader: the master level kept per song. */
+  setSongSpecificMaster(on: boolean) {
+    if (on === this.songMaster) return
+    this.songMaster = on
+    this.reloadMaster()
+    this.emit()
+  }
+
+  setReferenceVisible(on: boolean) {
+    if (on === !this.hideReference) return
+    this.hideReference = !on
+    this.applyGains()
+    this.emit()
+  }
+
+  /** Fader Default Level 80%: a song's faders start at 80% of the way to unity. */
+  setFaderDefault80(on: boolean) {
+    this.defaultVolume = on ? 0.6 : 0.75
+  }
+
+  /** MIDI Out: MIDI access is only asked for (and messages sent) while this is on. */
+  setMidiOut(on: boolean) {
+    this.midiOut = on
+    if (on && !this.midiStarted) {
+      this.midiStarted = true
+      void this.initMidi().then(() => this.emit())
+    }
+    this.emit()
+  }
+
+  private groupKey(name: string) {
+    return this.songBuses && this.song ? `${GROUP_PREFIX}${this.song.id}:${name}` : GROUP_PREFIX + name
+  }
+
+  private masterKey() {
+    return this.songMaster && this.song ? `__master:${this.song.id}` : '__master'
+  }
+
+  /** Bus settings for the loaded song's buses, from where they're kept (per song or for all). */
+  private reloadGroups() {
+    this.groups.clear()
+    const mix = loadMix()
+    for (const ch of this.channels.values()) {
+      if (!ch.busGroup || this.groups.has(ch.busGroup)) continue
+      const g = mix[this.groupKey(ch.busGroup)] ?? {}
+      this.groups.set(ch.busGroup, { volume: g.volume ?? 0.75, mute: g.mute ?? false, solo: false })
+    }
+    this.applyGains()
+  }
+
+  private reloadMaster() {
+    const mix = loadMix()
+    const v = mix[this.masterKey()]?.volume ?? mix.__master?.volume
+    this.masterVolume = typeof v === 'number' ? v : 0.75
+    for (const out of this.outputs.values()) out.master.gain.setTargetAtTime(faderToGain(this.masterVolume), this.ctx.currentTime, 0.01)
   }
 
   // ----------------------------------------------------------------- outputs
@@ -256,7 +370,11 @@ export class Engine {
       ch.gain.connect(ch.panner).connect(this.clickBus.input)
       return
     }
-    const bus = this.effectiveBus(ch.settings.bus)
+    const bus = this.autoPan
+      ? ch.group === 'click' || /guide|cue/i.test(ch.name)
+        ? 'mono:0'
+        : 'mono:1'
+      : this.effectiveBus(ch.settings.bus)
     if (parseBus(bus).kind === 'mono') ch.gain.connect(this.output(bus).input)
     else ch.gain.connect(ch.panner).connect(this.output(bus).input)
   }
@@ -316,12 +434,18 @@ export class Engine {
       gain,
       panner,
       analyser,
-      settings: { ...DEFAULT_SETTINGS, ...saved, solo: false, bus: normalizeBus(saved.bus ?? 'main') },
+      settings: {
+        ...DEFAULT_SETTINGS,
+        volume: fromSong ? this.defaultVolume : DEFAULT_SETTINGS.volume,
+        ...saved,
+        solo: false,
+        bus: normalizeBus(saved.bus ?? 'main'),
+      },
       fromSong,
       busGroup: group === 'stem' ? busGroupName(name) : null,
     }
     if (ch.busGroup && !this.groups.has(ch.busGroup)) {
-      const g = loadMix()[GROUP_PREFIX + ch.busGroup] ?? {}
+      const g = loadMix()[this.groupKey(ch.busGroup)] ?? {}
       this.groups.set(ch.busGroup, { volume: g.volume ?? 0.75, mute: g.mute ?? false, solo: false })
     }
     this.channels.set(id, ch)
@@ -344,7 +468,7 @@ export class Engine {
     for (const ch of all) {
       const s = ch.settings
       const g = grp(ch)
-      let on = !s.mute && !g?.mute
+      let on = !s.mute && !g?.mute && !(this.hideReference && ch.group === 'stem' && isReferenceName(ch.name))
       if (ch.group === 'stem') on &&= stemSolo ? s.solo || !!g?.solo : !clickSolo
       else if (ch.id !== 'click') on &&= !partSolo || s.solo
       const gain = on ? faderToGain(s.volume) * (g ? faderToGain(g.volume) : 1) : 0
@@ -357,8 +481,8 @@ export class Engine {
     for (const ch of this.channels.values()) {
       out[ch.id] = { volume: ch.settings.volume, mute: ch.settings.mute, bus: ch.settings.bus }
     }
-    for (const [name, g] of this.groups) out[GROUP_PREFIX + name] = { volume: g.volume, mute: g.mute }
-    out.__master = { volume: this.masterVolume }
+    for (const [name, g] of this.groups) out[this.groupKey(name)] = { volume: g.volume, mute: g.mute }
+    out[this.masterKey()] = { volume: this.masterVolume }
     try {
       localStorage.setItem(MIX_KEY, JSON.stringify(out))
     } catch {
@@ -425,6 +549,10 @@ export class Engine {
     this.pendingJump = null
     this.song = song
     this.dropSongChannels()
+    // Bus settings and the master level may be kept per song; the cues are made for each song.
+    this.groups.clear()
+    this.channels.get('cues')!.buffer = null
+    if (this.songMaster) this.reloadMaster()
     for (const stem of song.stems) {
       // A click stem (e.g. MultiTracks' Click Track) joins the click group and feeds the Click bus.
       const ch = this.createChannel(stem.id, stem.name, stem.id === song.clickStem ? 'click' : 'stem', true)
@@ -505,6 +633,16 @@ export class Engine {
     }
   }
 
+  /** Undoes a pre-roll or crossfade fade-in that's still under way: the stems back at full level. */
+  private resetStemFades() {
+    const now = this.ctx.currentTime
+    for (const ch of this.channels.values()) {
+      if (!ch.fromSong || ch.group !== 'stem') continue
+      ch.input.gain.cancelScheduledValues(now)
+      ch.input.gain.setValueAtTime(1, now)
+    }
+  }
+
   /** Stops and lets go of the current song (e.g. it was deleted). */
   unload() {
     this.stopSources()
@@ -550,7 +688,7 @@ export class Engine {
   regenerateClick() {
     if (!this.song) return
     // With the song's own click stem playing, the generated click stays silent.
-    const bufs = this.audioClick ? null : renderClick(this.ctx, this.song)
+    const bufs = this.audioClick ? null : renderClick(this.ctx, this.song, this.clickSound)
     this.channels.get('accent')!.buffer = bufs?.accent ?? null
     this.channels.get('q')!.buffer = bufs?.q ?? null
     this.channels.get('e')!.buffer = bufs?.e ?? null
@@ -633,7 +771,27 @@ export class Engine {
     if (this.ctx.state !== 'running') await this.ctx.resume()
     if (this.fading !== 'in') this.cancelFade()
     if (this.pausedPos >= this.song.duration - 0.05) this.pausedPos = 0
-    this.startSources(this.pausedPos, this.ctx.currentTime + 0.04)
+    // Song Section Pre-roll: from the start of a section, start a bar early, the click counting
+    // in and the tracks fading up to full by the section's downbeat.
+    let preroll = 0
+    if (this.sectionPreroll && this.pausedPos > 0) {
+      const bar = barLength(this.song)
+      const sec = this.song.sections.find((s) => Math.abs(s.start - this.pausedPos) < 0.02)
+      if (sec && sec.start - bar >= 0) {
+        this.pausedPos = sec.start - bar
+        preroll = bar
+      }
+    }
+    const when = this.ctx.currentTime + 0.04
+    this.startSources(this.pausedPos, when)
+    if (preroll) {
+      for (const ch of this.channels.values()) {
+        if (!ch.fromSong || ch.group !== 'stem') continue
+        ch.input.gain.cancelScheduledValues(when)
+        ch.input.gain.setValueAtTime(0, when)
+        ch.input.gain.linearRampToValueAtTime(1, when + preroll)
+      }
+    }
     this.prevBase = null
     this.playing = true
     this.sendMidi([this.pausedPos === 0 ? 0xfa : 0xfb])
@@ -644,6 +802,7 @@ export class Engine {
     if (!this.playing) return
     this.pausedPos = this.position
     this.stopSources()
+    this.resetStemFades()
     this.playing = false
     this.pendingJump = null
     this.cancelFade()
@@ -663,6 +822,7 @@ export class Engine {
     this.pendingJump = null
     if (this.playing) {
       this.stopSources()
+      this.resetStemFades()
       this.startSources(time, this.ctx.currentTime + 0.03)
       this.prevBase = null
     } else {
@@ -893,11 +1053,11 @@ export class Engine {
   }
 
   get midiAvailable() {
-    return this.midi.length > 0
+    return this.midiOut && this.midi.length > 0
   }
 
   sendMidi(bytes: number[]) {
-    if (this.midiMuted) return
+    if (this.midiMuted || !this.midiOut) return
     for (const out of this.midi) out.send(bytes)
   }
 
@@ -932,8 +1092,17 @@ export class Engine {
       audioClick: this.audioClick,
       channels: this.order.map((id) => {
         const c = this.channels.get(id)!
-        return { id: c.id, name: c.name, group: c.group, busGroup: c.busGroup, settings: c.settings }
+        return {
+          id: c.id,
+          name: c.name,
+          group: c.group,
+          busGroup: c.busGroup,
+          reference: c.group === 'stem' && isReferenceName(c.name),
+          settings: c.settings,
+        }
       }),
+      cues: !!this.channels.get('cues')?.buffer,
+      midiOut: this.midiOut,
       groups: this.groupList(),
     }
   }

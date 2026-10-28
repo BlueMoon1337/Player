@@ -15,6 +15,7 @@ interface SongSnapshot {
   timeSig: [number, number]
   clickOffset: number
   clickStem: string | null
+  pad: string | undefined
   sections: Section[]
 }
 
@@ -28,6 +29,7 @@ function snapshot(song: Song): SongSnapshot {
     timeSig: [song.timeSig[0], song.timeSig[1]],
     clickOffset: song.clickOffset,
     clickStem: song.clickStem ?? null,
+    pad: song.pad,
     sections: song.sections.map((s) => ({ ...s })),
   }
 }
@@ -61,6 +63,7 @@ function apply(song: Song, snap: SongSnapshot, kind: ChangeKind) {
     timeSig: [snap.timeSig[0], snap.timeSig[1]],
     clickOffset: snap.clickOffset,
     clickStem: snap.clickStem,
+    pad: snap.pad,
     sections: snap.sections.map((s) => ({ ...s })),
   })
   changed(song, kind)
