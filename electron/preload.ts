@@ -3,13 +3,6 @@ import type { DesktopAPI, ImportProgress, MenuCommand } from '../src/platform/ty
 
 const api: DesktopAPI = {
   platform: process.platform,
-  totalMemory: (() => {
-    try {
-      return process.getSystemMemoryInfo().total * 1024
-    } catch {
-      return 0
-    }
-  })(),
   library: {
     load: () => ipcRenderer.invoke('library:load'),
     pickImport: (kind) => ipcRenderer.invoke('library:pick', kind),
