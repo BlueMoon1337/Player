@@ -139,6 +139,8 @@ export interface FoundUpdate {
 
 export interface DesktopAPI {
   platform: string
+  /** The computer's RAM in bytes (0 if unknown), for how many songs to keep loaded. */
+  totalMemory: number
   library: {
     load(): Promise<LibraryData>
     /**

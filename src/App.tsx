@@ -69,6 +69,23 @@ function importNotice({ results, failed }: LibraryImport): Notice {
   return { kind: skipped.length || warnings.length ? 'warn' : 'info', text }
 }
 
+/**
+ * How much decoded audio to keep in memory. Decoded stems are large (a 16-stem, 6½-minute song is
+ * about 2 GB), so it's a share of the computer's RAM; a browser tab gets much less.
+ */
+const MEMORY_BUDGET = (() => {
+  const GB = 1024 ** 3
+  if (desktop?.totalMemory) return Math.max(1.5 * GB, desktop.totalMemory * 0.5 - GB)
+  const deviceGB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4
+  return Math.min(2 * GB, deviceGB * 0.3 * GB)
+})()
+
+/** Bytes a song's stems take decoded, or an estimate before they're loaded. */
+function songBytes(s: Song): number {
+  if (s.stems.length) return s.stems.reduce((t, st) => t + st.buffer.length * st.buffer.numberOfChannels * 4, 0)
+  return (s.stemFiles?.length ?? 8) * s.duration * 48000 * 2 * 4
+}
+
 const progressText = (verb: string) => (done: number, total: number, name: string) =>
   total > 1 ? `${verb} ${done + 1} of ${total}: ${name}` : `${verb} ${name}…`
 
@@ -186,28 +203,34 @@ export default function App() {
     pad.setKey(k)
   }
 
-  /** Stem loads under way (or done), so a preload and a selection never decode the same song twice. */
+  /** Stem loads under way, so a background load and a selection never decode the same song twice. */
   const stemLoads = useRef(new Map<string, Promise<void>>())
+  /** Counts song choices, so only the latest one finishes loading. */
+  const selecting = useRef(0)
 
-  /** Renders or reads a song's stems if they aren't in memory. `quiet` (a preload) shows no overlay. */
-  const ensureStems = useCallback((target: Song, quiet = false): Promise<void> => {
+  /**
+   * Renders or reads a song's stems if they aren't in memory. `show` says whether its progress
+   * belongs on screen right now: never for a background load, and only while it's still the
+   * song being chosen (a slow load overtaken by another choice keeps quiet).
+   */
+  const ensureStems = useCallback((target: Song, show: () => boolean = () => false): Promise<void> => {
     if (target.stems.length || (target.source !== 'demo' && target.source !== 'library')) return Promise.resolve()
+    const status = (text: string | null) => show() && setLoading(text)
     const pending = stemLoads.current.get(target.id)
     if (pending) {
-      if (!quiet) setLoading(`Loading “${target.title}”…`)
-      return pending.finally(() => !quiet && setLoading(null))
+      // Already loading in the background: show that it's on its way.
+      status(`Loading “${target.title}”…`)
+      return pending.finally(() => status(null))
     }
     const job = (async () => {
       if (target.source === 'demo') {
-        if (!quiet) setLoading(`Rendering “${target.title}”…`)
+        status(`Rendering “${target.title}”…`)
         // Let the overlay paint before the synchronous render.
         await new Promise((r) => setTimeout(r, 30))
         target.stems = renderDemoStems(engine.ctx, target)
       } else {
-        if (!quiet) setLoading(`Loading “${target.title}”…`)
-        const { stems, missing } = await loadSongStems(engine.ctx, target, (d, t, n) => {
-          if (!quiet) setLoading(progressText('Loading')(d, t, n))
-        })
+        status(`Loading “${target.title}”…`)
+        const { stems, missing } = await loadSongStems(engine.ctx, target, (d, t, n) => status(progressText('Loading')(d, t, n)))
         target.stems = stems
         if (missing.length) {
           setNotice({ kind: 'warn', text: `“${target.title}”: couldn't load ${missing.join(', ')}` })
@@ -216,7 +239,7 @@ export default function App() {
       if (!peaks.current.has(target.id)) peaks.current.set(target.id, computePeaks(target.stems, target.duration))
     })().finally(() => {
       stemLoads.current.delete(target.id)
-      if (!quiet) setLoading(null)
+      status(null)
     })
     stemLoads.current.set(target.id, job)
     return job
@@ -231,11 +254,13 @@ export default function App() {
     async (id: string, start: 'cue' | 'play' | { crossfade: number | null } = 'cue') => {
       const target = lib.songs[id]
       if (!target) return
+      // The last choice wins: an earlier one still loading neither shows progress nor loads.
+      const token = ++selecting.current
+      setLoading(null)
       const handoff = typeof start === 'object' ? start : null
       if (!handoff) engine.pause()
-      await ensureStems(target, !!handoff)
-      // Demo and library stems can be reloaded at any time, so only keep the current song in memory.
-      for (const s of Object.values(lib.songs)) if (s.id !== id && s.source !== 'user') s.stems = []
+      await ensureStems(target, () => !handoff && selecting.current === token)
+      if (selecting.current !== token) return
       if (!peaks.current.has(id)) peaks.current.set(id, computePeaks(target.stems, target.duration))
       if (handoff) await engine.handOff(target, handoff.crossfade)
       else engine.load(target)
@@ -301,6 +326,41 @@ export default function App() {
     [currentIndex, currentId, songs, endFor, selectSong],
   )
 
+  /**
+   * Keeps the setlist loaded, as Playback does: the current song, then the ones after it, then
+   * the ones before, as many as fit in the memory budget. Songs that drop out (another setlist,
+   * or ones already played when memory is short) are let go. A song is held once however many
+   * times, or in however many setlists, it appears.
+   */
+  useEffect(() => {
+    if (!lib.ready) return
+    const i = Math.max(0, currentIndex)
+    const order = [...new Set([...songs.slice(i), ...songs.slice(0, i).reverse()])]
+    const keep = new Set<string>(currentId ? [currentId] : [])
+    let total = currentId && lib.songs[currentId] ? songBytes(lib.songs[currentId]) : 0
+    for (const s of order) {
+      if (keep.has(s.id)) continue
+      const bytes = songBytes(s)
+      if (total + bytes > MEMORY_BUDGET) continue
+      total += bytes
+      keep.add(s.id)
+    }
+    for (const s of Object.values(lib.songs)) {
+      if (!keep.has(s.id) && s.stems.length && s.source !== 'user' && !stemLoads.current.has(s.id)) s.stems = []
+    }
+    // One at a time in the background, nearest first; a newer pass takes over from this one.
+    let stale = false
+    void (async () => {
+      for (const s of order) {
+        if (stale) return
+        if (keep.has(s.id) && !s.stems.length) await ensureStems(s).catch(() => {})
+      }
+    })()
+    return () => {
+      stale = true
+    }
+  }, [lib.ready, lib.songs, songs, currentId, currentIndex, ensureStems])
+
   // Overlap / Crossfade: the next song comes in at this one's last section (or a fade length before
   // its end). It, and AutoLink's next song, are read into memory ahead of time so there's no gap.
   useEffect(() => {
@@ -309,7 +369,7 @@ export default function App() {
     if (i < 0 || !song || !next) return void engine.setHandoff(null)
     const { end, continuePad } = endFor(i)
     if (end === 'link' || end === 'overlap' || end === 'crossfade') {
-      void ensureStems(next, true).catch(() => {})
+      void ensureStems(next).catch(() => {})
     }
     if (end !== 'overlap' && end !== 'crossfade') return void engine.setHandoff(null)
     const last = song.sections.length > 1 ? song.sections[song.sections.length - 1].start : null
@@ -347,8 +407,7 @@ export default function App() {
       const songs = results.map((r) => r.song)
       importSongs(songs)
       for (const s of songs) peaks.current.set(s.id, computePeaks(s.stems, s.duration))
-      // Keep only the song being loaded in memory; library songs reload from disk when chosen.
-      for (const s of songs.slice(1)) if (s.source === 'library') s.stems = []
+      ++selecting.current
       engine.pause()
       engine.load(songs[0])
       setCurrentId(songs[0].id)

@@ -177,6 +177,6 @@ To try updates against a stand-in for GitHub, set `PLAYER_UPDATE_API` to its add
 
 ## Notes / next steps
 
-- Stems are decoded fully into memory, so a song with many long stems uses a lot of RAM: a typical 17-stem MultiTracks song needs about 1.5 GB. Only the current song is kept loaded. Streaming stems from disk would remove this limit.
-- **Cue Next Song** loads the next song when the current one ends, which takes a moment for a large song. AutoLink, Overlap and Crossfade preload it.
+- **The setlist stays loaded**, as in Playback: after a song is chosen, the rest of the setlist loads in the background (the songs after it first, then the ones before), so switching songs is instant. A song is loaded once however many times, or in however many setlists, it appears.
+- Stems are decoded fully into memory, and that's large: a 16-stem, 6½-minute MultiTracks song takes about 2 GB. So Player keeps as much of the setlist loaded as fits in half the computer's RAM (less 1 GB). In a long setlist on a smaller machine, songs already played make room for the ones coming up, and a song that doesn't fit loads when it's chosen. Streaming stems from disk would remove this limit.
 - The Guide stem in the demo songs plays cue chimes, not spoken cues.
