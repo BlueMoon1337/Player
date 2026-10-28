@@ -73,7 +73,7 @@ export async function readZipSong(file: File): Promise<WebZipSong> {
       const head = new Uint8Array(await raw.slice(0, 2).arrayBuffer())
       const xmlBlob = head[0] === 0x1f && head[1] === 0x8b ? await new Response(raw.stream().pipeThrough(new DecompressionStream('gzip'))).blob() : raw
       const xml = await xmlBlob.text()
-      ableton = xml.includes('<Ableton') ? parseAbleton(xml) : null
+      ableton = xml.includes('<Ableton') ? parseAbleton(xml, parseSongName(file.name).bpm) : null
     } catch {
       ableton = null
     }

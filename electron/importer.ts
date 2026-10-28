@@ -10,7 +10,7 @@ import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import zlib from 'node:zlib'
 import { type AbletonSong, parseAbleton } from '../src/import/ableton'
-import { isJunk, pickFiles } from '../src/import/multitracks'
+import { isJunk, parseSongName, pickFiles } from '../src/import/multitracks'
 import { type ZipEntry, type ZipSource, baseName, checkSupported, dataStart, listZip } from '../src/import/zip'
 import type { CreatedSong, ImportProgress } from '../src/platform/types'
 import { type Library, newSongId, uniqueFileName } from './library'
@@ -35,11 +35,11 @@ function meter(onBytes: (n: number) => void) {
   return { stream, state }
 }
 
-/** Live sets are gzipped XML. */
-function readAbleton(data: Buffer): AbletonSong | null {
+/** Live sets are gzipped XML. The download's name gives the tempo if the set's can't be read. */
+function readAbleton(data: Buffer, sourceName?: string): AbletonSong | null {
   try {
     const xml = (data[0] === 0x1f && data[1] === 0x8b ? zlib.gunzipSync(data) : data).toString('utf8')
-    return xml.includes('<Ableton') ? parseAbleton(xml) : null
+    return xml.includes('<Ableton') ? parseAbleton(xml, sourceName ? parseSongName(sourceName).bpm : null) : null
   } catch {
     return null
   }
@@ -136,7 +136,7 @@ async function importZip(lib: Library, zipPath: string, report: Report): Promise
         checkSupported(set)
         const start = await dataStart(src, set)
         const raw = Buffer.from(await src.read(start, set.compressedSize))
-        ableton = readAbleton(set.method === 8 ? zlib.inflateRawSync(raw) : raw)
+        ableton = readAbleton(set.method === 8 ? zlib.inflateRawSync(raw) : raw, sourceName)
       } catch {
         ableton = null
       }
@@ -203,7 +203,7 @@ async function importFolder(lib: Library, folder: string, report: Report): Promi
   if (picked.ableton) {
     ableton = await fs
       .readFile(path.join(folder, picked.ableton))
-      .then(readAbleton)
+      .then((data) => readAbleton(data, sourceName))
       .catch(() => null)
   }
   return { songId, sourceName, files, failed, artwork, ableton }

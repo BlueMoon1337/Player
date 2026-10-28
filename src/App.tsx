@@ -64,7 +64,9 @@ function importNotice({ results, failed }: LibraryImport): Notice {
     text = `Imported ${results.length} songs: ${results.map((r) => r.song.title).join(', ')}`
   }
   if (skipped.length) text += `. Skipped ${skipped.map((f) => `${f.name} (${f.reason})`).join(', ')}`
-  return { kind: skipped.length ? 'warn' : 'info', text }
+  const warnings = results.flatMap((r) => (results.length > 1 ? r.warnings.map((w) => `${r.song.title}: ${w}`) : r.warnings))
+  if (warnings.length) text += `. ${warnings.join(' ')}`
+  return { kind: skipped.length || warnings.length ? 'warn' : 'info', text }
 }
 
 const progressText = (verb: string) => (done: number, total: number, name: string) =>

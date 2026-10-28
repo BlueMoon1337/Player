@@ -55,6 +55,8 @@ export interface ImportResult {
   skippedFiles: string[]
   /** Notes about what was picked up from file metadata, for the UI to show. */
   notes: string[]
+  /** Something the UI should point out, e.g. that no sections were found and why. */
+  warnings: string[]
 }
 
 interface Decoded {
@@ -155,6 +157,14 @@ export async function importStems(
   if (!name?.bpm && (set?.bpm || bpm)) notes.push(`${finalBpm} BPM`)
   if (timeSig && !set?.timeSig) notes.push(`${timeSig[0]}/${timeSig[1]}`)
   if (clickStem) notes.push(`its ${clickStem.name} as the click`)
+  const warnings: string[] = []
+  if (!setMarkers && !markerSource && (set || name?.album)) {
+    warnings.push(
+      set
+        ? 'No sections found: its Ableton set has no locators or clips named like sections. Add them in the song map (EDIT).'
+        : 'No sections found: there’s no Ableton set (.als) in it. Add them in the song map (EDIT).',
+    )
+  }
 
   const title =
     (name?.album ? name.title : null) ||
@@ -183,5 +193,5 @@ export async function importStems(
     artwork: opts.meta?.artwork ?? songArtwork(title),
     source: opts.source ?? 'user',
   }
-  return { song, skipped, skippedFiles, notes }
+  return { song, skipped, skippedFiles, notes, warnings }
 }
