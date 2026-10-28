@@ -19,6 +19,8 @@ interface Props {
   onMove: (index: number, dir: -1 | 1) => void
   /** A library song dropped on the setlist, to go in at this position. */
   onDropSong: (songId: string, index: number) => void
+  /** Edit mode: a card dragged to another place in the setlist (`to` is its new index). */
+  onReorder: (from: number, to: number) => void
   /** Edit mode ("Setlist / Song Map"): Playback's big cards with their controls. */
   editing: boolean
   /** What happens when each song ends, and changing it. */
@@ -28,6 +30,9 @@ interface Props {
   onAddSong: (index: number | undefined, anchor: DOMRect) => void
   onSongSettings: (songId: string) => void
 }
+
+/** Drag type for a card being moved within the setlist (edit mode). */
+const CARD_DRAG = 'application/x-player-setlist-card'
 
 /** 'first' is how Cue reads after the last song: Cue First Song. */
 type EndIconKind = SongEnd | 'first' | 'pad'
@@ -160,31 +165,44 @@ export function Setlist(p: Props) {
   const input = useRef<HTMLInputElement>(null)
   /** The end-of-song popover: which card (by position) and where its button is. */
   const [endMenu, setEndMenu] = useState<{ index: number; anchor: DOMRect } | null>(null)
-  /** Where a song being dragged in would go. */
+  /** Where a song being dragged in (or a card being moved) would go: before the card at this index. */
   const [dropAt, setDropAt] = useState<number | null>(null)
+  /** Edit mode: the card being dragged to a new place. */
+  const [dragFrom, setDragFrom] = useState<number | null>(null)
 
-  /** A song dragged from the library goes before the first card whose middle is right of the pointer. */
+  /**
+   * Drops go before the first card whose middle is right of the pointer. A song from the library
+   * is added there; a card dragged in edit mode moves there.
+   */
   const dropProps = {
     onDragOver: (e: React.DragEvent<HTMLDivElement>) => {
-      if (!e.dataTransfer.types.includes(SONG_DRAG)) return
+      const moving = dragFrom !== null && e.dataTransfer.types.includes(CARD_DRAG)
+      if (!moving && !e.dataTransfer.types.includes(SONG_DRAG)) return
       e.preventDefault()
-      e.dataTransfer.dropEffect = 'copy'
+      e.dataTransfer.dropEffect = moving ? 'move' : 'copy'
       const cards = [...e.currentTarget.querySelectorAll<HTMLElement>('[data-index]')]
       const at = cards.find((c) => {
         const r = c.getBoundingClientRect()
         return e.clientX < r.left + r.width / 2
       })
-      setDropAt(at ? Number(at.dataset.index) : songs.length)
+      const to = at ? Number(at.dataset.index) : songs.length
+      // Right before or after the card being moved leaves it where it is: no marker.
+      setDropAt(moving && (to === dragFrom || to === dragFrom! + 1) ? null : to)
     },
     onDragLeave: (e: React.DragEvent<HTMLDivElement>) => {
       if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(null)
     },
     onDrop: (e: React.DragEvent<HTMLDivElement>) => {
-      const id = e.dataTransfer.getData(SONG_DRAG)
-      if (!id) return
       e.preventDefault()
-      p.onDropSong(id, dropAt ?? songs.length)
+      const at = dropAt
       setDropAt(null)
+      if (dragFrom !== null && e.dataTransfer.types.includes(CARD_DRAG)) {
+        if (at !== null) p.onReorder(dragFrom, at > dragFrom ? at - 1 : at)
+        setDragFrom(null)
+        return
+      }
+      const id = e.dataTransfer.getData(SONG_DRAG)
+      if (id) p.onDropSong(id, at ?? songs.length)
     },
   }
   const dropClass = (i: number) => (dropAt === i ? 'drop-before' : '')
@@ -218,8 +236,28 @@ export function Setlist(p: Props) {
           const setting = p.songEnd(s.id)
           const end = shownEnd(setting, i === songs.length - 1)
           return (
-            <div key={`${s.id}-${i}`} data-index={i} className={`ecard-wrap ${s.id === currentId ? 'active' : ''} ${dropClass(i)}`}>
-              <div className="ecard" onContextMenu={(e) => showContextMenu(e, menu(s, i))} onDoubleClick={() => onSelect(s.id)}>
+            <div
+              key={`${s.id}-${i}`}
+              data-index={i}
+              className={`ecard-wrap ${s.id === currentId ? 'active' : ''} ${dropClass(i)} ${dragFrom === i ? 'dragging' : ''}`}
+            >
+              <div
+                className="ecard"
+                title="Drag to move it in the setlist"
+                draggable
+                onDragStart={(e) => {
+                  setEndMenu(null)
+                  setDragFrom(i)
+                  e.dataTransfer.effectAllowed = 'move'
+                  e.dataTransfer.setData(CARD_DRAG, String(i))
+                }}
+                onDragEnd={() => {
+                  setDragFrom(null)
+                  setDropAt(null)
+                }}
+                onContextMenu={(e) => showContextMenu(e, menu(s, i))}
+                onDoubleClick={() => onSelect(s.id)}
+              >
                 <img className="ecard-art" src={s.artwork} alt="" draggable={false} />
                 <button className="ec-btn ec-remove" title="Remove from setlist (stays in the library)" onClick={() => onRemove(i)}>
                   <svg viewBox="0 0 24 24" aria-hidden="true">

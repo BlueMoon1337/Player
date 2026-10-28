@@ -32,7 +32,7 @@ A multitrack backing-track player for live worship and band use, in the spirit o
 
   The current setlist's name is shown above the buttons.
 - **Edit mode (Setlist / Song Map).**
-  - **Setlist:** big cards with **−** (out of the setlist), **•••** (load, Song Settings, move, delete), and **+** between cards to add a song there, or **Add a Song** at the end.
+  - **Setlist:** big cards with **−** (out of the setlist), **•••** (load, Song Settings, move), and **+** between cards to add a song there, or **Add a Song** at the end. Drag a card to move it to another place in the setlist; ⌘Z undoes the move.
   - **End of song:** the button at each card's corner says what happens when the song ends, as in Playback:
     - **Cue Next Song** (the default) loads the next song, ready to play. After the last song it's **Cue First Song**.
     - **Stay In Song** leaves the song loaded at its end.

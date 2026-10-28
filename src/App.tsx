@@ -593,6 +593,7 @@ export default function App() {
           onRemove={(i) => setlist && removeFromSetlist(setlist.id, i)}
           onMove={(i, dir) => setlist && moveInSetlist(setlist.id, i, i + dir)}
           onDropSong={(id, index) => setlist && addToSetlist(setlist.id, [id], index)}
+          onReorder={(from, to) => setlist && moveInSetlist(setlist.id, from, to)}
         />
       )}
       <Timeline
