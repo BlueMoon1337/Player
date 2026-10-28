@@ -119,18 +119,59 @@ export function sectionIndexAt(song: Song, time: number): number {
   return idx
 }
 
+/** Section colours, after Playback's song map. */
 export function sectionColor(name: string): string {
   const n = name.toLowerCase()
-  if (n.startsWith('count')) return '#6b7280'
-  if (n.startsWith('intro')) return '#14b8a6'
-  if (n.startsWith('verse')) return '#3b82f6'
-  if (n.startsWith('pre')) return '#a855f7'
-  if (n.startsWith('chorus')) return '#ef4444'
-  if (n.startsWith('bridge')) return '#22c55e'
-  if (n.startsWith('tag')) return '#eab308'
-  if (n.startsWith('turn') || n.startsWith('inst')) return '#f97316'
-  if (n.startsWith('outro') || n.startsWith('ending')) return '#0ea5e9'
-  return '#94a3b8'
+  if (n.startsWith('count')) return '#71717a'
+  if (n.startsWith('intro')) return '#0d9488'
+  if (n.startsWith('verse')) return '#6366f1'
+  if (n.startsWith('pre')) return '#ca8a04'
+  if (n.startsWith('chorus')) return '#ea580c'
+  if (n.startsWith('bridge')) return '#db2777'
+  if (n.startsWith('tag')) return '#16a34a'
+  if (n.startsWith('turn') || n.startsWith('inst') || n.startsWith('interlude')) return '#0891b2'
+  if (n.startsWith('outro') || n.startsWith('ending')) return '#7c3aed'
+  return '#64748b'
+}
+
+/** Section types offered when adding one; the numbered ones count up (Verse 1, Verse 2…). */
+export const SECTION_TYPES: { name: string; numbered: boolean }[] = [
+  { name: 'Count In', numbered: false },
+  { name: 'Intro', numbered: false },
+  { name: 'Verse', numbered: true },
+  { name: 'Pre-chorus', numbered: false },
+  { name: 'Chorus', numbered: true },
+  { name: 'Bridge', numbered: true },
+  { name: 'Instrumental', numbered: false },
+  { name: 'Turnaround', numbered: false },
+  { name: 'Tag', numbered: false },
+  { name: 'Outro', numbered: false },
+  { name: 'Ending', numbered: false },
+]
+
+/** A new section's name: numbered types get the next number in this song ("Verse 3"). */
+export function nextSectionName(type: { name: string; numbered: boolean }, sections: Section[]): string {
+  if (!type.numbered) return type.name
+  const re = new RegExp(`^${type.name}\\s*(\\d+)$`, 'i')
+  const used = sections.map((s) => Number(re.exec(s.name.trim())?.[1] ?? 0))
+  return `${type.name} ${Math.max(0, ...used) + 1}`
+}
+
+/** The badge on a section, as Playback abbreviates: Verse 1 → V1, Pre-chorus → Pc, Count In → Co, Tag → Ta. */
+export function sectionAbbrev(name: string): string {
+  const n = name.trim()
+  const special: [RegExp, string][] = [
+    [/^count/i, 'Co'],
+    [/^inst/i, 'It'],
+    [/^interlude/i, 'Il'],
+    [/^turn/i, 'Tu'],
+  ]
+  for (const [re, abbrev] of special) if (re.test(n)) return abbrev
+  const num = /^(\S)\S*.*?\s*(\d+)$/.exec(n)
+  if (num) return (num[1].toUpperCase() + num[2]).slice(0, 3)
+  const parts = n.split('-').filter(Boolean)
+  if (parts.length > 1) return parts[0][0].toUpperCase() + parts[1][0].toLowerCase()
+  return n ? n[0].toUpperCase() + (n[1] ?? '').toLowerCase() : '?'
 }
 
 export function formatTime(sec: number): string {

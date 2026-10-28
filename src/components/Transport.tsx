@@ -2,13 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import type { Engine, EngineState } from '../audio/engine'
 import { type Song, formatTime } from '../audio/types'
 
-export type EditMode = 'song' | 'setlist'
-
-export const EDIT_MODES: { mode: EditMode; label: string; hint: string }[] = [
-  { mode: 'song', label: 'Song', hint: 'Sections, tempo, key and click' },
-  { mode: 'setlist', label: 'Setlist', hint: 'Reorder and remove songs' },
-]
-
 interface Props {
   engine: Engine
   state: EngineState
@@ -18,10 +11,11 @@ interface Props {
   padOn: boolean
   onPad: () => void
   onBack: () => void
-  editMode: EditMode | null
-  /** Click: turns the last-used edit mode on or off. */
+  /** Edit mode ("Setlist / Song Map", as in Playback). */
+  editing: boolean
   onEdit: () => void
-  onEditMode: (mode: EditMode) => void
+  /** The loaded song's settings (title, key, tempo, click). */
+  onSongSettings: () => void
   setlistsOpen: boolean
   onSetlists: () => void
   onMore: () => void
@@ -61,8 +55,8 @@ function TimeDisplay({ engine, song }: { engine: Engine; song: Song | null }) {
   )
 }
 
-/** EDIT: a click toggles; holding it (or right-clicking) offers the edit modes. */
-function EditButton({ editMode, onEdit, onEditMode }: Pick<Props, 'editMode' | 'onEdit' | 'onEditMode'>) {
+/** EDIT / DONE: a click toggles edit mode; holding it (or right-clicking) offers the edit choices. */
+function EditButton({ editing, onEdit, onSongSettings }: Pick<Props, 'editing' | 'onEdit' | 'onSongSettings'>) {
   const [choosing, setChoosing] = useState(false)
   const holdTimer = useRef<number | undefined>(undefined)
   const held = useRef(false)
@@ -81,12 +75,15 @@ function EditButton({ editMode, onEdit, onEditMode }: Pick<Props, 'editMode' | '
     }
   }, [choosing])
 
-  const label = editMode ? `EDIT · ${editMode === 'song' ? 'SONG' : 'SETLIST'}` : 'EDIT'
+  const choices = [
+    { label: 'Setlist / Song Map', hint: 'Reorder songs, add and delete sections', on: editing, run: () => !editing && onEdit() },
+    { label: 'Song Settings…', hint: 'Title, key, tempo, click', on: false, run: onSongSettings },
+  ]
   return (
     <div className="t-edit-wrap" ref={wrap}>
       <button
-        className={`t-tile t-btn t-edit ${editMode ? 'on' : ''}`}
-        title="Edit mode (press and hold for modes)"
+        className={`t-tile t-btn t-edit ${editing ? 'on' : ''}`}
+        title={editing ? 'Done editing' : 'Edit the setlist and song map (press and hold for more)'}
         aria-haspopup="menu"
         onPointerDown={() => {
           held.current = false
@@ -107,23 +104,22 @@ function EditButton({ editMode, onEdit, onEditMode }: Pick<Props, 'editMode' | '
           held.current = false
         }}
       >
-        {label}
+        {editing ? 'DONE' : 'EDIT'}
       </button>
       {choosing && (
         <div className="t-edit-menu" role="menu">
-          {EDIT_MODES.map((m) => (
+          {choices.map((c) => (
             <button
-              key={m.mode}
-              role="menuitemradio"
-              aria-checked={editMode === m.mode}
-              className={editMode === m.mode ? 'on' : ''}
+              key={c.label}
+              role="menuitem"
+              className={c.on ? 'on' : ''}
               onClick={() => {
                 setChoosing(false)
-                onEditMode(m.mode)
+                c.run()
               }}
             >
-              <b>{m.label}</b>
-              <span>{m.hint}</span>
+              <b>{c.label}</b>
+              <span>{c.hint}</span>
             </button>
           ))}
         </div>
@@ -189,7 +185,7 @@ export function Transport(p: Props) {
             {state.playing ? <path d="M5 9c5 0 8 14 22 14H5z" /> : <path d="M27 9c-5 0-8 14-22 14h22z" />}
           </svg>
         </button>
-        <EditButton editMode={p.editMode} onEdit={p.onEdit} onEditMode={p.onEditMode} />
+        <EditButton editing={p.editing} onEdit={p.onEdit} onSongSettings={p.onSongSettings} />
         <button
           className={`t-tile t-btn t-icon ${p.setlistsOpen ? 'on' : ''}`}
           onClick={p.onSetlists}

@@ -22,11 +22,16 @@ export interface SongRecord {
   clickStem?: string | null
 }
 
+/** What happens when a song in a setlist ends: stop, continue into the next song, or loop it. */
+export type SongEnd = 'stop' | 'next' | 'loop'
+
 export interface SetlistRecord {
   id: string
   name: string
   /** Song ids in order (demo songs are `demo-N`). */
   songs: string[]
+  /** Per song, what happens when it ends; missing means stop. */
+  ends?: Record<string, SongEnd>
 }
 
 /** What library.json keeps (version 2). */
@@ -88,6 +93,7 @@ export type MenuCommand =
   | 'pad'
   | 'settings'
   | 'check-updates'
+  | 'song-settings'
   | 'setlists'
   | 'undo'
   | 'redo'

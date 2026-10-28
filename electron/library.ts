@@ -55,7 +55,13 @@ function parseLibraryFile(raw: unknown): LibraryState | null {
   if (lib.version !== 2 || !Array.isArray(lib.setlists)) return null
   const setlists: SetlistRecord[] = lib.setlists
     .filter((s: Record<string, unknown>) => s && typeof s.id === 'string' && ID_RE.test(s.id) && typeof s.name === 'string')
-    .map((s: Record<string, unknown>) => ({ id: s.id as string, name: (s.name as string).slice(0, 80), songs: ids(s.songs) }))
+    .map((s: Record<string, unknown>) => {
+      const ends: Record<string, 'next' | 'loop'> = {}
+      for (const [k, v] of Object.entries((s.ends as Record<string, unknown>) ?? {})) {
+        if (ID_RE.test(k) && (v === 'next' || v === 'loop')) ends[k] = v
+      }
+      return { id: s.id as string, name: (s.name as string).slice(0, 80), songs: ids(s.songs), ends }
+    })
   const current = typeof lib.currentSetlist === 'string' && setlists.some((s) => s.id === lib.currentSetlist) ? lib.currentSetlist : null
   return { setlists, currentSetlist: current, hiddenDemos: ids(lib.hiddenDemos) }
 }

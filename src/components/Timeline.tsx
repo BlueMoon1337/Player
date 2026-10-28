@@ -1,6 +1,18 @@
 import { useEffect, useRef } from 'react'
 import type { Engine, EngineState, JumpMode } from '../audio/engine'
-import { type Song, sectionColor, sectionEnd, sectionIndexAt } from '../audio/types'
+import { barLength } from '../audio/synth'
+import {
+  SECTION_TYPES,
+  type Song,
+  nextSectionName,
+  sectionAbbrev,
+  sectionColor,
+  sectionEnd,
+  sectionIndexAt,
+  uid,
+} from '../audio/types'
+import { UNDO_KEY, showNote } from '../library/history'
+import { type MenuEntry, type MenuItem, promptDialog, showContextMenu } from './Ask'
 
 interface Props {
   engine: Engine
@@ -10,9 +22,16 @@ interface Props {
   jumpMode: JumpMode
   /** Bumped when the song's sections change so the canvas redraws. */
   version: number
+  /** Edit mode ("Setlist / Song Map"): sections become blocks with add / delete controls. */
+  editing?: boolean
+  /** Makes one undoable change to the song. */
+  edit?: (label: string, change: () => void) => void
 }
 
-export function Timeline({ engine, state, song, peaks, jumpMode, version }: Props) {
+/** A section narrower than this shows a ••• menu instead of its − and + buttons (as Playback does). */
+const FULL_CONTROLS_PX = 130
+
+export function Timeline({ engine, state, song, peaks, jumpMode, version, editing = false, edit }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const wrap = useRef<HTMLDivElement>(null)
   const playhead = useRef<HTMLDivElement>(null)
@@ -36,6 +55,10 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version }: Prop
       g.clearRect(0, 0, w, h)
       if (!song) return
       const x = (t: number) => (t / song.duration) * w
+      if (editing) {
+        drawSongMap(g, song, peaks, w, h)
+        return
+      }
       song.sections.forEach((s, i) => {
         const x0 = x(s.start)
         const x1 = x(sectionEnd(song, i))
@@ -65,7 +88,7 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version }: Prop
     const ro = new ResizeObserver(draw)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [song, peaks, version])
+  }, [song, peaks, version, editing])
 
   // Playhead + active section highlight run on rAF without re-rendering React.
   useEffect(() => {
@@ -92,6 +115,77 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version }: Prop
   const seekFromEvent = (e: React.PointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect()
     engine.seek(((e.clientX - r.left) / r.width) * song.duration)
+  }
+
+  if (editing && edit) {
+    return (
+      <div className="timeline song-map">
+        <button className="smap-btn smap-add-start" title="Add a section at the playhead" onClick={(e) => showAt(e, addAtPlayhead(song, engine, edit))}>
+          <PlusIcon />
+        </button>
+        <div
+          className="wave"
+          ref={wrap}
+          onPointerDown={(e) => {
+            if ((e.target as HTMLElement).closest('button')) return
+            e.currentTarget.setPointerCapture(e.pointerId)
+            seekFromEvent(e)
+          }}
+        >
+          <canvas ref={canvas} />
+          <div className="smap-blocks" ref={labels}>
+            {song.sections.map((s, i) => {
+              const left = (s.start / song.duration) * 100
+              const width = ((sectionEnd(song, i) - s.start) / song.duration) * 100
+              const px = ((wrap.current?.clientWidth ?? 1000) * width) / 100
+              const looping = state.loop?.sectionId === s.id
+              const menu = sectionMenu(song, i, engine, edit, looping)
+              return (
+                <div
+                  key={s.id}
+                  className={`section-label smap-block ${looping ? 'looping' : ''} ${state.pendingJump?.sectionId === s.id ? 'pending' : ''}`}
+                  style={{ left: `${left}%`, width: `${width}%`, ['--c' as string]: sectionColor(s.name) }}
+                  onContextMenu={(e) => showContextMenu(e, menu)}
+                >
+                  <button
+                    className="smap-badge"
+                    title={`${s.name}: jump here${i < 9 ? ` (${i + 1})` : ''}`}
+                    onClick={() => engine.jumpToSection(s.id, jumpMode)}
+                  >
+                    {sectionAbbrev(s.name)}
+                  </button>
+                  <button
+                    className={`smap-loop ${looping ? 'on' : ''}`}
+                    title={looping ? 'Stop looping' : `Loop ${s.name}`}
+                    aria-pressed={looping}
+                    onClick={() => engine.toggleLoop(s.id)}
+                  >
+                    <LoopIcon />
+                  </button>
+                  {px >= FULL_CONTROLS_PX ? (
+                    <>
+                      {song.sections.length > 1 && (
+                        <button className="smap-btn smap-del" title={`Delete ${s.name}`} onClick={() => deleteSection(song, i, edit)}>
+                          <MinusIcon />
+                        </button>
+                      )}
+                      <button className="smap-btn smap-add" title="Add a section after this one" onClick={(e) => showAt(e, insertMenu(song, i, engine, edit))}>
+                        <PlusIcon />
+                      </button>
+                    </>
+                  ) : (
+                    <button className="smap-btn smap-more" title={`${s.name}: more`} onClick={(e) => showAt(e, menu)}>
+                      •••
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          <div className="playhead" ref={playhead} />
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -150,3 +244,109 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version }: Prop
     </div>
   )
 }
+
+// --------------------------------------------------------------- song map
+
+/** Edit mode's look: a pale waveform over bar lines; the section blocks are drawn as elements on top. */
+function drawSongMap(g: CanvasRenderingContext2D, song: Song, peaks: Float32Array | null, w: number, h: number) {
+  const bar = barLength(song)
+  g.fillStyle = 'rgba(255, 255, 255, 0.07)'
+  for (let t = song.clickOffset % bar; t < song.duration; t += bar) g.fillRect(Math.round((t / song.duration) * w), 0, 1, h)
+  if (!peaks) return
+  const mid = h / 2
+  g.fillStyle = 'rgba(228, 228, 231, 0.72)'
+  for (let px = 0; px < w; px++) {
+    const b = Math.floor((px / w) * peaks.length)
+    const b2 = Math.max(b + 1, Math.floor(((px + 1) / w) * peaks.length))
+    let v = 0
+    for (let k = b; k < b2 && k < peaks.length; k++) v = Math.max(v, peaks[k])
+    const amp = Math.max(0.5, v * (h * 0.36))
+    g.fillRect(px, mid - amp, 1, amp * 2)
+  }
+}
+
+const showAt = (e: React.MouseEvent<HTMLElement>, items: MenuEntry[]) => {
+  const r = e.currentTarget.getBoundingClientRect()
+  showContextMenu({ clientX: r.left, clientY: r.bottom + 4, preventDefault() {} }, items)
+}
+
+/** Snaps a time to the nearest bar line of the song's click grid. */
+function snapToBar(song: Song, t: number) {
+  const bar = barLength(song)
+  return Math.max(0, song.clickOffset + Math.round((t - song.clickOffset) / bar) * bar)
+}
+
+type Edit = (label: string, change: () => void) => void
+
+function insertAt(song: Song, at: number, typeIndex: number, edit: Edit) {
+  const t = Math.min(song.duration - 0.1, Math.max(0, at))
+  if (song.sections.some((s) => Math.abs(s.start - t) < 0.05)) return
+  const name = nextSectionName(SECTION_TYPES[typeIndex], song.sections)
+  edit(`Add Section “${name}”`, () => {
+    song.sections.push({ id: uid('sec'), name, start: t })
+    song.sections.sort((a, b) => a.start - b.start)
+  })
+}
+
+const typeItems = (onPick: (i: number) => void): MenuItem[] => SECTION_TYPES.map((t, i) => ({ label: t.name, onClick: () => onPick(i) }))
+
+/** + after a section: the new one splits it at the playhead if that's inside it, else at its middle bar. */
+function insertMenu(song: Song, i: number, engine: Engine, edit: Edit): MenuItem[] {
+  const start = song.sections[i].start
+  const end = sectionEnd(song, i)
+  const pos = engine.position
+  const at = pos > start + 0.05 && pos < end - 0.05 ? snapToBar(song, pos) : snapToBar(song, (start + end) / 2)
+  const split = at > start + 0.05 && at < end - 0.05 ? at : (start + end) / 2
+  return typeItems((t) => insertAt(song, split, t, edit))
+}
+
+function addAtPlayhead(song: Song, engine: Engine, edit: Edit): MenuItem[] {
+  return typeItems((t) => insertAt(song, snapToBar(song, engine.position), t, edit))
+}
+
+/** Straight away (like deleting a slide in Lumen), and undoable: its time joins the section before. */
+function deleteSection(song: Song, i: number, edit: Edit) {
+  if (song.sections.length < 2) return
+  const name = song.sections[i].name
+  edit(`Delete Section “${name}”`, () => {
+    song.sections.splice(i, 1)
+    song.sections[0].start = 0
+  })
+  showNote(`Deleted the section “${name}”. ${UNDO_KEY} undoes this.`, true)
+}
+
+function sectionMenu(song: Song, i: number, engine: Engine, edit: Edit, looping: boolean): MenuEntry[] {
+  const s = song.sections[i]
+  return [
+    { label: looping ? 'Stop Looping' : 'Loop', onClick: () => engine.toggleLoop(s.id) },
+    { label: 'Add Section After', submenu: insertMenu(song, i, engine, edit) },
+    { label: 'Change To', submenu: typeItems((t) => edit('Rename Section', () => (s.name = nextSectionName(SECTION_TYPES[t], song.sections.filter((x) => x !== s))))) },
+    {
+      label: 'Rename…',
+      onClick: () =>
+        void promptDialog({ title: 'Rename Section', defaultValue: s.name, confirmLabel: 'Rename' }).then(
+          (name) => name && edit('Rename Section', () => (s.name = name)),
+        ),
+    },
+    {
+      label: 'Move Start to Playhead',
+      disabled: i === 0,
+      onClick: () =>
+        edit('Move Section', () => {
+          s.start = engine.position
+          song.sections.sort((a, b) => a.start - b.start)
+        }),
+    },
+    'separator',
+    { label: 'Delete Section', danger: true, disabled: song.sections.length < 2, onClick: () => deleteSection(song, i, edit) },
+  ]
+}
+
+const icon = (d: string) => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d={d} />
+  </svg>
+)
+const PlusIcon = () => icon('M12 6v12M6 12h12')
+const MinusIcon = () => icon('M7 12h10')
+const LoopIcon = () => icon('M7 7h10a4 4 0 0 1 0 8M17 17H7a4 4 0 0 1 0-8')

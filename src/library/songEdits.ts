@@ -8,6 +8,7 @@ import { record } from './history'
 
 interface SongSnapshot {
   title: string
+  artist: string | undefined
   key: string
   bpm: number
   timeSig: [number, number]
@@ -19,6 +20,7 @@ interface SongSnapshot {
 function snapshot(song: Song): SongSnapshot {
   return {
     title: song.title,
+    artist: song.artist,
     key: song.key,
     bpm: song.bpm,
     timeSig: [song.timeSig[0], song.timeSig[1]],
@@ -50,6 +52,7 @@ export function onSongChanged(fn: (song: Song, kind: ChangeKind) => void) {
 function apply(song: Song, snap: SongSnapshot, kind: ChangeKind) {
   Object.assign(song, {
     title: snap.title,
+    artist: snap.artist,
     key: snap.key,
     bpm: snap.bpm,
     timeSig: [snap.timeSig[0], snap.timeSig[1]],

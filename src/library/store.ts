@@ -9,7 +9,7 @@ import { demoSongs } from '../audio/synth'
 import { type Song, uid } from '../audio/types'
 import { desktop } from '../platform'
 import { songFromRecord } from '../platform/library'
-import type { LibraryState, SetlistRecord } from '../platform/types'
+import type { LibraryState, SetlistRecord, SongEnd } from '../platform/types'
 import { UNDO_KEY, record, showNote } from './history'
 
 export type Setlist = SetlistRecord
@@ -198,6 +198,25 @@ export function moveInSetlist(setlistId: string, from: number, to: number) {
       return { ...s, songs }
     }),
   )
+}
+
+/** Sets what happens when a song in a setlist ends (the button on its card in edit mode). */
+export function setSongEnd(setlistId: string, songId: string, end: SongEnd) {
+  const sl = state.setlists.find((s) => s.id === setlistId)
+  if (!sl || (sl.ends?.[songId] ?? 'stop') === end) return
+  const label = { stop: 'Stop After', next: 'Continue After', loop: 'Loop' }[end]
+  setlistStep(`${label} ${title(songId)}`, () =>
+    replaceSetlist(setlistId, (s) => {
+      const ends = { ...s.ends }
+      if (end === 'stop') delete ends[songId]
+      else ends[songId] = end
+      return { ...s, ends }
+    }),
+  )
+}
+
+export function songEnd(setlist: Setlist | undefined, songId: string): SongEnd {
+  return setlist?.ends?.[songId] ?? 'stop'
 }
 
 export function newSetlist(name: string, songs: string[] = []): string {

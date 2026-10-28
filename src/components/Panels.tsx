@@ -229,17 +229,23 @@ function NumberField({
   )
 }
 
-export function EditPanel({ engine, song, edit }: EditProps) {
+export function EditPanel({ engine, song, edit, sectionsEditable = true }: EditProps & { sectionsEditable?: boolean }) {
   const sortSections = () => song.sections.sort((a, b) => a.start - b.start)
   return (
     <div className="panel edit-panel">
       <div className="panel-head">
-        <h3>Edit song</h3>
         <label>
           Title
           <input
             value={song.title}
             onChange={(e) => edit('Rename Song', () => (song.title = e.target.value), 'title')}
+          />
+        </label>
+        <label>
+          Artist
+          <input
+            value={song.artist ?? ''}
+            onChange={(e) => edit('Change Artist', () => (song.artist = e.target.value || undefined), 'artist')}
           />
         </label>
         <div className="row">
@@ -302,20 +308,25 @@ export function EditPanel({ engine, song, edit }: EditProps) {
             />
           </label>
         </div>
-        <button
-          className="small"
-          onClick={() => {
-            const at = engine.position
-            if (song.sections.some((s) => Math.abs(s.start - at) < 0.05)) return
-            edit('Add Section', () => {
-              song.sections.push({ id: uid('sec'), name: 'Verse 1', start: at })
-              sortSections()
-            })
-          }}
-        >
-          + Section at playhead
-        </button>
+        {sectionsEditable && (
+          <button
+            className="small"
+            onClick={() => {
+              const at = engine.position
+              if (song.sections.some((s) => Math.abs(s.start - at) < 0.05)) return
+              edit('Add Section', () => {
+                song.sections.push({ id: uid('sec'), name: 'Verse 1', start: at })
+                sortSections()
+              })
+            }}
+          >
+            + Section at playhead
+          </button>
+        )}
       </div>
+      {!sectionsEditable ? (
+        <p className="hint section-hint">Load this song to change its sections here or in the song map.</p>
+      ) : (
       <div className="section-list">
         {song.sections.map((s, i) => (
           <div key={s.id} className="section-row" style={{ ['--c' as string]: sectionColor(s.name) }}>
@@ -371,6 +382,51 @@ export function EditPanel({ engine, song, edit }: EditProps) {
             <option key={n} value={n} />
           ))}
         </datalist>
+      </div>
+      )}
+    </div>
+  )
+}
+
+/** Song Settings (from a song's ••• menu or EDIT's hold menu): the song editor, in a window. */
+export function SongSettingsDialog({
+  engine,
+  song,
+  loaded,
+  edit,
+  onClose,
+}: {
+  engine: Engine
+  song: Song
+  /** Sections are edited against the playhead, so only for the song that's loaded. */
+  loaded: boolean
+  edit: EditProps['edit']
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !document.querySelector('.ask-backdrop')) onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div className="menu-backdrop center" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog song-settings" role="dialog" aria-label="Song Settings">
+        <div className="dialog-head">
+          <h3>Song Settings</h3>
+          <button className="dialog-close" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </div>
+        <EditPanel engine={engine} song={song} edit={edit} sectionsEditable={loaded} />
+        <div className="dialog-actions">
+          <span className="muted">Changes save as you make them, and {navigator.platform.includes('Mac') ? '⌘Z' : 'Ctrl+Z'} undoes them.</span>
+          <span className="dialog-actions-spacer" />
+          <button className="primary" onClick={onClose}>
+            Done
+          </button>
+        </div>
       </div>
     </div>
   )

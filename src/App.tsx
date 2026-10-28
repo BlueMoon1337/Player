@@ -7,11 +7,11 @@ import { renderDemoStems } from './audio/synth'
 import { type Song, keyRoot, sectionIndexAt } from './audio/types'
 import { AskHost, ContextMenuHost, isAsking } from './components/Ask'
 import { Mixer } from './components/Mixer'
-import { BusesPanel, EditPanel, Menu, PadPanel } from './components/Panels'
+import { BusesPanel, Menu, PadPanel, SongSettingsDialog } from './components/Panels'
 import { Setlist } from './components/Setlist'
 import { SetlistsMenu, confirmDeleteSong } from './components/SetlistsMenu'
 import { Timeline } from './components/Timeline'
-import { type EditMode, Transport } from './components/Transport'
+import { Transport } from './components/Transport'
 import { UpdateDialog } from './components/UpdateDialog'
 import { clearNote, redo, undo, useHistory } from './library/history'
 import { editSong, onSongChanged } from './library/songEdits'
@@ -23,7 +23,9 @@ import {
   onSaveError,
   removeFromSetlist,
   setlistSongs,
+  setSongEnd,
   songChanged,
+  songEnd,
   useLibrary,
 } from './library/store'
 import { type MenuCommand, desktop } from './platform'
@@ -79,8 +81,11 @@ export default function App() {
   const [loading, setLoading] = useState<string | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [version, setVersion] = useState(0)
-  const [editMode, setEditMode] = useState<EditMode | null>(null)
-  const lastEditMode = useRef<EditMode>('song')
+  // Edit mode: Playback's "Setlist / Song Map".
+  const [editing, setEditingState] = useState(false)
+  const [settingsFor, setSettingsFor] = useState<string | null>(null)
+  /** The Setlists window opened from a + in the setlist: library view, adding at this position. */
+  const [addAt, setAddAt] = useState<number | null>(null)
   const [setlistOpen, setSetlistOpen] = useState(true)
   const [setlistsOpen, setSetlistsOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -99,10 +104,9 @@ export default function App() {
   const peaks = useRef(new Map<string, Float32Array>())
   const saveTimers = useRef(new Map<string, number>())
 
-  const chooseEditMode = (mode: EditMode | null) => {
-    if (mode) lastEditMode.current = mode
-    setEditMode(mode)
-    if (mode) setPanel(null)
+  const setEditing = (on: boolean) => {
+    setEditingState(on)
+    if (on) setPanel(null)
   }
 
   useEffect(() => {
@@ -156,17 +160,18 @@ export default function App() {
     desktop?.setMenuState({
       jumpMode,
       setlistOpen,
-      editMode: editMode !== null,
+      editMode: editing,
       undoLabel: history.undoLabel,
       redoLabel: history.redoLabel,
     })
-  }, [jumpMode, setlistOpen, editMode, history.undoLabel, history.redoLabel])
+  }, [jumpMode, setlistOpen, editing, history.undoLabel, history.redoLabel])
 
   const song = (currentId && lib.songs[currentId]) || null
 
   useEffect(() => {
-    document.title = song ? `${song.title} — Player` : 'Player'
-  }, [song?.title])
+    // As Playback's window does: "Yo Te Bendeciré (Setlist / Song Map)" while editing.
+    document.title = song ? (editing ? `${song.title} (Setlist / Song Map)` : `${song.title} — Player`) : 'Player'
+  }, [song?.title, editing])
 
   const setPadOn = (on: boolean) => {
     setPadOnState(on)
@@ -229,15 +234,20 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lib.songs, currentId])
 
-  // Linked setlist: roll into the next song when one ends.
+  // When a song ends: what its card in the setlist says (stop, continue, loop). Link continues after every song.
   useEffect(
     () =>
       engine.onEnded(() => {
-        if (!link) return
-        const i = songs.findIndex((s) => s.id === currentId)
-        if (i >= 0 && i + 1 < songs.length) void selectSong(songs[i + 1].id, true)
+        const end = link ? 'next' : currentId ? songEnd(setlist ?? undefined, currentId) : 'stop'
+        if (end === 'loop') {
+          engine.seek(0)
+          void engine.play()
+        } else if (end === 'next') {
+          const i = songs.findIndex((s) => s.id === currentId)
+          if (i >= 0 && i + 1 < songs.length) void selectSong(songs[i + 1].id, true)
+        }
       }),
-    [link, songs, currentId, selectSong],
+    [link, songs, currentId, selectSong, setlist],
   )
 
   const step = useCallback(
@@ -272,7 +282,7 @@ export default function App() {
       engine.load(songs[0])
       setCurrentId(songs[0].id)
       if (padFollow) setPadKey(keyRoot(songs[0].key))
-      if (songs.length === 1) chooseEditMode('song')
+      if (songs.length === 1) setEditing(true)
       setNotice(importNotice(imported))
     } catch (e) {
       setNotice({ kind: 'error', text: `Couldn't import: ${(e as Error).message}` })
@@ -403,9 +413,12 @@ export default function App() {
     else if (cmd.startsWith('jump:')) setJumpMode(cmd.slice(5) as JumpMode)
     else if (cmd === 'toggle-setlist') setSetlistOpen((v) => !v)
     else if (cmd === 'setlists') setSetlistsOpen(true)
-    else if (cmd === 'toggle-edit') chooseEditMode(editMode ? null : lastEditMode.current)
+    else if (cmd === 'toggle-edit') setEditing(!editing)
+    else if (cmd === 'song-settings') {
+      if (currentId) setSettingsFor(currentId)
+    }
     else if (cmd === 'outputs' || cmd === 'pad') {
-      chooseEditMode(null)
+      setEditingState(false)
       setPanel(cmd === 'outputs' ? 'buses' : 'pad')
     } else if (cmd === 'settings') setMenuOpen(true)
     else if (cmd === 'check-updates') {
@@ -478,7 +491,7 @@ export default function App() {
   const deleteFromLibrary = (s: Song) => void confirmDeleteSong(s, { playingNow: state.playing && s.id === currentId })
 
   return (
-    <div className={`app ${setlistOpen ? '' : 'no-setlist'}`}>
+    <div className={`app ${setlistOpen ? '' : 'no-setlist'} ${editing ? 'editing' : ''}`}>
       <Transport
         engine={engine}
         state={state}
@@ -487,9 +500,9 @@ export default function App() {
         padOn={padOn}
         onPad={() => setPadOn(!padOn)}
         onBack={() => engine.seek(0)}
-        editMode={editMode}
-        onEdit={() => chooseEditMode(editMode ? null : lastEditMode.current)}
-        onEditMode={(m) => chooseEditMode(editMode === m ? null : m)}
+        editing={editing}
+        onEdit={() => setEditing(!editing)}
+        onSongSettings={() => currentId && setSettingsFor(currentId)}
         setlistsOpen={setlistsOpen}
         onSetlists={() => setSetlistsOpen((v) => !v)}
         onMore={() => setMenuOpen(true)}
@@ -499,7 +512,15 @@ export default function App() {
         <Setlist
           songs={songs}
           currentId={currentId}
-          editing={editMode === 'setlist'}
+          editing={editing}
+          playing={state.playing}
+          songEnd={(id) => songEnd(setlist ?? undefined, id)}
+          onSongEnd={(id, end) => setlist && setSongEnd(setlist.id, id, end)}
+          onAddSong={(index) => {
+            setAddAt(index ?? songs.length)
+            setSetlistsOpen(true)
+          }}
+          onSongSettings={setSettingsFor}
           onSelect={(id) => void selectSong(id)}
           onImport={importFiles}
           onImportClick={desktop ? () => openImport() : undefined}
@@ -515,13 +536,12 @@ export default function App() {
         peaks={currentId ? (peaks.current.get(currentId) ?? null) : null}
         jumpMode={jumpMode}
         version={version}
+        editing={editing}
+        edit={song ? (label, change) => editSong(song, label, change) : undefined}
       />
       <div className="lower">
-        {editMode === 'song' && song && (
-          <EditPanel engine={engine} song={song} edit={(label, change, field) => editSong(song, label, change, field)} />
-        )}
-        {!editMode && panel === 'buses' && <BusesPanel engine={engine} state={state} />}
-        {!editMode && panel === 'pad' && (
+        {!editing && panel === 'buses' && <BusesPanel engine={engine} state={state} />}
+        {!editing && panel === 'pad' && (
           <PadPanel
             pad={pad}
             padOn={padOn}
@@ -541,7 +561,7 @@ export default function App() {
           panel={panel}
           setPanel={(p) => {
             setPanel(p)
-            if (p) setEditMode(null)
+            if (p) setEditingState(false)
           }}
           link={link}
           setLink={setLink}
@@ -554,7 +574,21 @@ export default function App() {
           playing={state.playing}
           onLoadSong={(id) => void selectSong(id)}
           onImport={() => openImport()}
-          onClose={() => setSetlistsOpen(false)}
+          addAt={addAt}
+          onAdded={() => setAddAt((i) => (i === null ? i : i + 1))}
+          onClose={() => {
+            setSetlistsOpen(false)
+            setAddAt(null)
+          }}
+        />
+      )}
+      {settingsFor && lib.songs[settingsFor] && (
+        <SongSettingsDialog
+          engine={engine}
+          song={lib.songs[settingsFor]}
+          loaded={settingsFor === currentId}
+          edit={(label, change, field) => editSong(lib.songs[settingsFor], label, change, field)}
+          onClose={() => setSettingsFor(null)}
         />
       )}
       {menuOpen && (

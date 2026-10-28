@@ -1496,3 +1496,308 @@ button.destructive {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   font-size: 13px;
 }
+
+/* ------------------------------------------- edit mode: setlist / song map */
+/* After Playback's "Setlist / Song Map" edit mode. */
+
+.app.editing {
+  grid-template-rows: auto 190px minmax(210px, 36vh) 1fr;
+}
+.app.editing.no-setlist {
+  grid-template-rows: auto minmax(210px, 40vh) 1fr;
+}
+.app.editing .mixer {
+  opacity: 0.55;
+  transition: opacity 0.2s;
+}
+button.t-edit.on {
+  color: #fafafa;
+  background: #1b1c20;
+  border-color: #3a3d45;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.setlist.editing {
+  gap: 16px;
+  padding: 16px 20px 8px;
+  align-items: flex-start;
+  background: #0a0b0d;
+}
+.ecard-wrap {
+  flex: 0 0 236px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.ecard {
+  position: relative;
+  height: 132px;
+  border-radius: 10px;
+  background: #18191d;
+}
+.ecard-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 10px;
+  user-select: none;
+}
+.ecard-wrap.active .ecard {
+  box-shadow: 0 0 0 3px #e4e4e7;
+}
+.ec-btn,
+.smap-btn {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  border: none;
+  color: #fff;
+  z-index: 2;
+}
+.ec-btn svg,
+.smap-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ec-remove,
+.smap-del {
+  background: #f43f5e;
+}
+.ec-remove {
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.ec-more {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(16, 17, 20, 0.88);
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+.ec-end,
+.ec-insert,
+.smap-add,
+.smap-add-start,
+.smap-more {
+  background: #0b0c0e;
+  box-shadow: 0 0 0 1.5px #3a3d45;
+}
+.ec-end {
+  right: -25px;
+  top: -14px;
+}
+.ec-end.end-stop svg {
+  stroke-width: 2;
+  width: 16px;
+  height: 16px;
+}
+.ec-insert {
+  right: -25px;
+  bottom: -14px;
+}
+button.ec-btn:hover,
+button.smap-btn:hover {
+  filter: brightness(1.25);
+}
+.ecard-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 16px;
+  color: #d4d4d8;
+  text-align: left;
+  white-space: nowrap;
+}
+.ecard-wrap.active .ecard-title {
+  color: #fff;
+  font-weight: 700;
+}
+.ecard-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ecard-key {
+  flex: none;
+}
+.ecard-playing {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: #4ade80;
+  stroke-width: 2.2;
+  stroke-linejoin: round;
+}
+.ecard-playing.on {
+  fill: #4ade80;
+}
+.ecard-add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  border: 2px solid #3a3d45;
+  background: transparent;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+}
+.ecard-add svg {
+  width: 40px;
+  height: 40px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.ecard-title.placeholder {
+  height: 22px;
+  border-radius: 6px;
+  background: #16171a;
+}
+
+.timeline.song-map {
+  grid-template-columns: 56px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  padding: 10px 14px 10px 4px;
+  background: #0a0b0d;
+}
+.smap-add-start {
+  position: relative;
+  align-self: center;
+  justify-self: center;
+}
+.song-map .wave {
+  background: transparent;
+  border-radius: 0;
+}
+.smap-blocks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.section-label.smap-block {
+  top: 0;
+  bottom: 0;
+  display: block;
+  padding: 0;
+  pointer-events: none;
+}
+.smap-block::before {
+  content: '';
+  position: absolute;
+  inset: 0 1px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--c) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 42%, transparent);
+}
+.smap-block.current::before {
+  border-color: color-mix(in srgb, var(--c) 80%, transparent);
+  background: color-mix(in srgb, var(--c) 18%, transparent);
+}
+.smap-block.looping::before {
+  border: 2px solid var(--accent);
+}
+.smap-block.pending::before {
+  animation: blink-block 0.5s steps(2) infinite;
+}
+@keyframes blink-block {
+  50% {
+    background: color-mix(in srgb, var(--c) 35%, transparent);
+  }
+}
+.smap-badge,
+.smap-loop,
+.smap-block .smap-btn {
+  pointer-events: auto;
+}
+.smap-badge {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: none;
+  background: color-mix(in srgb, var(--c) 72%, #111);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  z-index: 2;
+}
+.smap-loop {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  width: 40px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: rgba(255, 255, 255, 0.32);
+  z-index: 2;
+}
+.smap-loop svg {
+  width: 34px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+.smap-loop.on {
+  color: var(--accent);
+}
+.smap-del {
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.smap-add {
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.smap-more {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.dialog.song-settings {
+  width: 820px;
+}
+.dialog.song-settings .panel {
+  max-height: none;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+.section-hint {
+  align-self: center;
+  max-width: 260px;
+}

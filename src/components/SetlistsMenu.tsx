@@ -25,6 +25,10 @@ interface Props {
   playing: boolean
   onLoadSong: (id: string) => void
   onImport: () => void
+  /** Opened from a + in the setlist: start in the library, and add songs at this position. */
+  addAt?: number | null
+  /** A song was added at `addAt` (the next one goes after it). */
+  onAdded?: () => void
   onClose: () => void
 }
 
@@ -73,10 +77,15 @@ async function askRename(id: string, name: string) {
 const listText = (items: string[]) =>
   items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 
-export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onClose }: Props) {
+export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, addAt = null, onAdded, onClose }: Props) {
   const lib = useLibrary()
   const current = currentSetlist(lib)
-  const [view, setView] = useState<'library' | 'setlist'>('setlist')
+  const [view, setView] = useState<'library' | 'setlist'>(addAt !== null ? 'library' : 'setlist')
+  /** Adds to the current setlist: at the + that opened this window, else at the end. */
+  const add = (songId: string) => {
+    addToSetlist(current.id, [songId], addAt ?? undefined)
+    if (addAt !== null) onAdded?.()
+  }
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<number | null>(null)
   const [dragFrom, setDragFrom] = useState<number | null>(null)
@@ -117,7 +126,7 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
       else if (e.key === 'ArrowDown') setSelected((s) => Math.min(shown.length - 1, s === null ? 0 : s + 1))
       else if (e.key === 'ArrowUp') setSelected((s) => Math.max(0, s === null ? 0 : s - 1))
       else if (e.key === 'Enter' && selected !== null && shown[selected]) {
-        if (view === 'library') addToSetlist(current.id, [shown[selected].id])
+        if (view === 'library') add(shown[selected].id)
         else onLoadSong(shown[selected].id)
       } else return
       e.preventDefault()
@@ -132,7 +141,7 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
     const items: MenuEntry[] = [
       { label: 'Load', onClick: () => onLoadSong(song.id) },
       view === 'library'
-        ? { label: `Add to “${current.name}”`, onClick: () => addToSetlist(current.id, [song.id]) }
+        ? { label: `Add to “${current.name}”`, onClick: () => add(song.id) }
         : { label: 'Remove from Setlist', hint: '⌫', onClick: () => removeFromSetlist(current.id, index) },
     ]
     if (others.length) {
@@ -217,6 +226,11 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
         <section className="sl-main">
           <header className="sl-head">
             <h3>{view === 'library' ? 'Library' : current.name}</h3>
+            {view === 'library' && addAt !== null && (
+              <span className="muted sl-sub">
+                Adding to “{current.name}” at position {addAt + 1}
+              </span>
+            )}
             {view === 'library' ? (
               <input
                 className="sl-search"
@@ -252,7 +266,7 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
                     dropAt === i && dragFrom !== null ? (dragFrom < i ? 'drop-after' : 'drop-before') : ''
                   }`}
                   onClick={() => setSelected(i)}
-                  onDoubleClick={() => (view === 'library' ? addToSetlist(current.id, [song.id]) : onLoadSong(song.id))}
+                  onDoubleClick={() => (view === 'library' ? add(song.id) : onLoadSong(song.id))}
                   onContextMenu={(e) => {
                     setSelected(i)
                     showContextMenu(e, songMenu(song, i))
@@ -298,7 +312,7 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
                       title={inSetlist ? `Already in “${current.name}” (add again)` : `Add to “${current.name}”`}
                       onClick={(e) => {
                         e.stopPropagation()
-                        addToSetlist(current.id, [song.id])
+                        add(song.id)
                       }}
                     >
                       {inSetlist ? '✓ Added' : '+ Add'}
