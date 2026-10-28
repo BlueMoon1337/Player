@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import type { Section } from '../src/audio/types'
 import type { LibraryData, LibraryState, PadRecord, SetlistRecord, SongEnd, SongRecord } from '../src/platform/types'
 
 const SONG_ENDS: SongEnd[] = ['cue', 'stay', 'link', 'overlap', 'crossfade']
@@ -70,7 +71,17 @@ function parseLibraryFile(raw: unknown): LibraryState | null {
         if (v.pad === true) e.pad = true
         if (e.end || e.pad) ends[k] = e
       }
-      return { id: s.id as string, name: (s.name as string).slice(0, 80), songs: ids(s.songs), ends }
+      // Section edits made in this setlist, per song: kept only if well formed.
+      const sections: NonNullable<SetlistRecord['sections']> = {}
+      for (const [k, v] of Object.entries((s.sections as Record<string, unknown>) ?? {})) {
+        if (!ID_RE.test(k) || !Array.isArray(v) || !v.length) continue
+        const list = v.filter(
+          (x): x is Section =>
+            !!x && typeof x.id === 'string' && typeof x.name === 'string' && typeof x.start === 'number' && Number.isFinite(x.start),
+        )
+        if (list.length === v.length) sections[k] = list.map((x) => ({ id: x.id.slice(0, 64), name: x.name.slice(0, 64), start: Math.max(0, x.start) }))
+      }
+      return { id: s.id as string, name: (s.name as string).slice(0, 80), songs: ids(s.songs), ends, sections }
     })
   const current = typeof lib.currentSetlist === 'string' && setlists.some((s) => s.id === lib.currentSetlist) ? lib.currentSetlist : null
   return { setlists, currentSetlist: current, hiddenDemos: ids(lib.hiddenDemos) }

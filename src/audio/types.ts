@@ -27,7 +27,13 @@ export interface Song {
   /** Seconds at which bar 1, beat 1 of the click falls. */
   clickOffset: number
   duration: number
+  /**
+   * The sections in the current setlist: that setlist's own edit of them, or else the song's own
+   * (`librarySections`). Edits in the song map change these, for that setlist only.
+   */
   sections: Section[]
+  /** The song's own sections (from import; saved with the song), before any setlist's edits. */
+  librarySections?: Section[]
   /** Audio stems. Empty until the song is loaded (demo and library songs load lazily). */
   stems: Stem[]
   /** Library stem files, kept while `stems` is unloaded so the song can be reloaded from disk. */

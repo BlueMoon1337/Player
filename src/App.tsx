@@ -25,7 +25,9 @@ import {
   onSaveError,
   removeFromSetlist,
   setlistSongs,
+  setSetlistSections,
   setSongEnd,
+  setlistSections,
   songChanged,
   songEnd,
   useLibrary,
@@ -42,6 +44,18 @@ const engine = new Engine()
 const pad = new PadPlayer(engine.ctx)
 
 const SETTINGS_KEY = 'player.settings.v1'
+
+/**
+ * Gives a song the sections it has in the current setlist (its own, unless they were edited in
+ * that setlist). Returns whether they changed.
+ */
+function arrange(song: Song): boolean {
+  song.librarySections ??= song.sections.map((s) => ({ ...s }))
+  const want = setlistSections(currentSetlist(), song)
+  if (JSON.stringify(want) === JSON.stringify(song.sections)) return false
+  song.sections = want.map((s) => ({ ...s }))
+  return true
+}
 
 /** A pad saved in the library folder, read from there when it plays. */
 const padFromRecord = (r: PadRecord): ImportedPad => ({
@@ -355,6 +369,7 @@ export default function App() {
       // Demo and library stems can be reloaded at any time, so only keep the current song in memory.
       for (const s of Object.values(lib.songs)) if (s.id !== id && s.source !== 'user') s.stems = []
       if (!peaks.current.has(id)) peaks.current.set(id, computePeaks(target.stems, target.duration))
+      arrange(target)
       if (handoff) await engine.handOff(target, handoff.crossfade)
       else engine.load(target)
       setCurrentId(id)
@@ -365,6 +380,15 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [lib, songs, padFollow, ensureStems],
   )
+
+  // Switching setlist (or undoing a setlist change): the loaded song shows that setlist's sections.
+  useEffect(() => {
+    const loaded = engine.currentSong
+    if (!loaded || !lib.ready || !arrange(loaded)) return
+    engine.sectionsChanged()
+    setVersion((v) => v + 1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setlist])
 
   // Load the first song once the library is ready.
   useEffect(() => {
@@ -468,6 +492,7 @@ export default function App() {
       // Keep only the song being loaded in memory; library songs reload from disk when chosen.
       for (const s of songs.slice(1)) if (s.source === 'library') s.stems = []
       engine.pause()
+      arrange(songs[0])
       engine.load(songs[0])
       setCurrentId(songs[0].id)
       if (padFollow) setPadKey(keyRoot(songs[0].key))
@@ -656,6 +681,12 @@ export default function App() {
   useEffect(
     () =>
       onSongChanged((changed, kind) => {
+        // Section edits belong to the setlist they're made in (the loaded song's); the song's own
+        // sections, saved with it, stay as they were.
+        if (engine.currentSong === changed && changed.librarySections) {
+          const own = JSON.stringify(changed.sections) === JSON.stringify(changed.librarySections)
+          setSetlistSections(currentSetlist().id, changed.id, own ? null : changed.sections)
+        }
         if (engine.currentSong === changed) {
           if (kind.clickSource) void engine.reloadSong()
           else if (kind.timing) engine.regenerateClick()

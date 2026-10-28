@@ -6,7 +6,7 @@
  */
 import { useSyncExternalStore } from 'react'
 import { demoSongs } from '../audio/synth'
-import { type Song, uid } from '../audio/types'
+import { type Section, type Song, uid } from '../audio/types'
 import { desktop } from '../platform'
 import { songFromRecord } from '../platform/library'
 import type { LibraryState, SetlistRecord, SongEnd, SongEndSetting } from '../platform/types'
@@ -135,6 +135,24 @@ export function setlistSongs(setlist: Setlist | undefined, s = state): Song[] {
   return (setlist?.songs ?? []).map((id) => s.songs[id]).filter((x): x is Song => !!x)
 }
 
+/** A song's sections in a setlist: as edited there, else the song's own. */
+export function setlistSections(setlist: Setlist | undefined, song: Song): Section[] {
+  return setlist?.sections?.[song.id] ?? song.librarySections ?? song.sections
+}
+
+/**
+ * Keeps a song's edited sections with a setlist (null: back to the song's own). Saved, but not an
+ * undo step of its own: the song edit that made them is.
+ */
+export function setSetlistSections(setlistId: string, songId: string, sections: Section[] | null) {
+  replaceSetlist(setlistId, (s) => {
+    const map = { ...s.sections }
+    if (sections) map[songId] = sections.map((x) => ({ ...x }))
+    else delete map[songId]
+    return { ...s, sections: map }
+  })
+}
+
 /** The setlists a song is in. */
 export function setlistsWith(songId: string, s = state): Setlist[] {
   return s.setlists.filter((sl) => sl.songs.includes(songId))
@@ -256,7 +274,7 @@ export function renameSetlist(id: string, name: string) {
 export function duplicateSetlist(id: string) {
   const sl = state.setlists.find((s) => s.id === id)
   if (!sl) return
-  const copy = { id: uid('setlist'), name: `${sl.name} copy`, songs: [...sl.songs] }
+  const copy = { id: uid('setlist'), name: `${sl.name} copy`, songs: [...sl.songs], ends: { ...sl.ends }, sections: { ...sl.sections } }
   const at = state.setlists.indexOf(sl) + 1
   setlistStep(`Duplicate Setlist “${sl.name}”`, () => {
     const setlists = [...state.setlists]

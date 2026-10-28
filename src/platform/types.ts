@@ -57,6 +57,8 @@ export interface SetlistRecord {
   songs: string[]
   /** Per song, what happens when it ends; missing means cue the next song, pad off. */
   ends?: Record<string, { end?: SongEnd; pad?: boolean }>
+  /** Per song, its sections as edited in this setlist; missing means the song's own. */
+  sections?: Record<string, Section[]>
 }
 
 /** What library.json keeps (version 2). */

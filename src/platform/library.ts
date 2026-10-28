@@ -24,7 +24,8 @@ export function recordFromSong(song: Song): SongRecord {
     timeSig: song.timeSig,
     clickOffset: song.clickOffset,
     duration: song.duration,
-    sections: song.sections,
+    // The song's own sections; a setlist's edits of them are kept with that setlist.
+    sections: song.librarySections ?? song.sections,
     stems,
     artwork,
     clickStem: song.clickStem ?? null,
@@ -44,6 +45,7 @@ export function songFromRecord(rec: SongRecord): Song {
     clickOffset: rec.clickOffset,
     duration: rec.duration,
     sections: rec.sections,
+    librarySections: rec.sections.map((s) => ({ ...s })),
     stems: [],
     stemFiles: rec.stems,
     clickStem: rec.clickStem ?? null,
