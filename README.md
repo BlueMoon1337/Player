@@ -65,7 +65,7 @@ A multitrack backing-track player for live worship and band use, in the spirit o
 
   Each section on the timeline has the same loop button: click it once to repeat the section once, twice to repeat it until turned off, and a third time to stop. The keyboard does the same with **⇧L** and **L**.
 - **Settings** (the ≡ button), laid out like Playback's, with **General**, **Outputs** and **About** tabs. General has:
-  - **Auto Pan:** click and guide out the left output, everything else out the right (for a stereo output).
+  - **Auto Pan** (on by default, as in Playback): on a stereo output (headphones, the built-in speakers, a 2-output interface), the click, guide and cues go out the left and all tracks and the pad out the right, each mixed to mono. Connect it to the sound system with a 1/8" TRS to dual 1/4" TS cable and a stereo direct box (or two mono ones, or two line inputs): the left to the in-ears, the right to front of house. With a multi-output interface, each channel's routing in Outputs applies instead. The strips show L or R, and Outputs shows each channel's side.
   - **Click Sound:** Classic, Woodblock, Hi-Hat or Beep. A song's own Click Track is chosen in Song Settings ▸ Click.
   - **Guide Cue Language** (desktop app): spoken section cues a bar before each section, in English (female or male), Spanish, Portuguese or French, made with the computer's own voices (`say` on a Mac, the Windows speech voices, espeak-ng on Linux) and kept for next time. They play on the **Cues** strip in the click group. Off by default, as a MultiTracks Guide track already speaks them.
   - **Count Into Each Section:** the cue counts the rest of that bar: "Chorus, two, three, four".

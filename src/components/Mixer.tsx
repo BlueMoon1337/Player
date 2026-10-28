@@ -191,7 +191,15 @@ export function Mixer(p: Props) {
         onMute={() => set({ mute: !s.mute })}
         onSolo={() => set({ solo: !s.solo })}
         meter={meter(c.group === 'click' && c.id !== 'cues' ? () => clickMeter(engine, c.id) : () => engine.meter(c.id))}
-        route={routable ? shortRoute(s.bus) : undefined}
+        route={
+          !routable
+            ? undefined
+            : state.autoPan
+              ? c.group === 'click' || /guide|cue/i.test(c.name)
+                ? 'L'
+                : 'R'
+              : shortRoute(s.bus)
+        }
         menu={() => [
           { label: s.mute ? 'Unmute' : 'Mute', onClick: () => set({ mute: !s.mute }) },
           { label: s.solo ? 'Unsolo' : 'Solo', onClick: () => set({ solo: !s.solo }) },

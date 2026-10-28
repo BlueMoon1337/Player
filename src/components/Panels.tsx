@@ -111,7 +111,14 @@ export function OutputsPanel({ engine, state }: { engine: Engine; state: EngineS
             ' Choose a multi-output audio interface to send click and guide to their own outputs.'}
         </p>
         {error && <p className="panel-error">{error}</p>}
-        {state.outputCount >= 4 ? (
+        {state.autoPan && (
+          <p className="panel-note">
+            <b>Auto Pan is on</b> (Settings ▸ General): click, guide and cues go out the left, mixed to mono, and all
+            tracks and the pad out the right. Use a 1/8&quot; TRS to dual 1/4&quot; TS cable and direct boxes (or two
+            line inputs) to send each side to the sound system: the left to the in-ears, the right to front of house.
+          </p>
+        )}
+        {state.autoPan ? null : state.outputCount >= 4 ? (
           <button className="small" onClick={() => preset('pair:1', 'main')}>
             Click/Guide → Out 3/4 · Tracks → Main
           </button>
@@ -120,9 +127,11 @@ export function OutputsPanel({ engine, state }: { engine: Engine; state: EngineS
             Click/Guide left · Tracks right
           </button>
         )}
-        <button className="small" onClick={() => preset('main', 'main')}>
-          All to Main
-        </button>
+        {!state.autoPan && (
+          <button className="small" onClick={() => preset('main', 'main')}>
+            All to Main
+          </button>
+        )}
       </div>
       <div className="bus-grid">
         {routable.map((c) => {
@@ -130,16 +139,26 @@ export function OutputsPanel({ engine, state }: { engine: Engine; state: EngineS
           return (
             <label key={c.id} className="bus-row">
               <span>{c.name}</span>
-              <select value={c.settings.bus} onChange={(e) => engine.setChannel(c.id, { bus: e.target.value as Bus })}>
-                {missing && (
-                  <option value={c.settings.bus}>{busLabel(c.settings.bus)} (not on this device → Main)</option>
-                )}
-                {options.map((b) => (
-                  <option key={b} value={b}>
-                    {busLabel(b)}
-                  </option>
-                ))}
-              </select>
+              {state.autoPan ? (
+                // Auto Pan decides: the side it goes out.
+                <span className="bus-auto" title="Auto Pan is routing this (Settings ▸ General)">
+                  {isMonitor(c.name, c.group) ? 'Left (in-ears)' : 'Right (tracks)'}
+                </span>
+              ) : (
+                <select
+                  value={c.settings.bus}
+                  onChange={(e) => engine.setChannel(c.id, { bus: e.target.value as Bus })}
+                >
+                  {missing && (
+                    <option value={c.settings.bus}>{busLabel(c.settings.bus)} (not on this device → Main)</option>
+                  )}
+                  {options.map((b) => (
+                    <option key={b} value={b}>
+                      {busLabel(b)}
+                    </option>
+                  ))}
+                </select>
+              )}
             </label>
           )
         })}

@@ -63,6 +63,13 @@ export class PadPlayer {
     this.out.connect(this.analyser)
   }
 
+  /** Sends the pad somewhere else than straight to the device (the engine's outputs). */
+  connectTo(node: AudioNode) {
+    this.out.disconnect()
+    this.out.connect(this.analyser)
+    this.out.connect(node)
+  }
+
   /** Peak level of the pad's output, for its meter. */
   meter(): number {
     if (!this.on && !this.voice) return 0

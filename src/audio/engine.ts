@@ -79,6 +79,8 @@ export interface EngineState {
   }[]
   /** Spoken section cues are made for the loaded song. */
   cues: boolean
+  /** Auto Pan is splitting a stereo output: click and guide left, tracks right. */
+  autoPan: boolean
   /** Settings ▸ MIDI Out. */
   midiOut: boolean
   /** The loaded song's buses (stems grouped by name), in mixer order. */
@@ -182,6 +184,7 @@ export class Engine {
   /** `ctx` is injectable so tests can render the graph offline with any channel count. */
   constructor(ctx?: AudioContext) {
     this.ctx = ctx ?? new AudioContext({ latencyHint: 'interactive' })
+    this.padInput = this.ctx.createGain()
     const saved = loadMix()
     if (typeof saved.__master?.volume === 'number') this.masterVolume = saved.__master.volume
     this.configureOutputs()
@@ -189,6 +192,7 @@ export class Engine {
       const ch = this.createChannel(c.id, c.name, 'click')
       if (c.id === 'click') this.clickBus = ch
     }
+    this.routePad()
     this.state = this.buildState()
     this.tickTimer = window.setInterval(() => this.tick(), 30)
     this.ctx.addEventListener('sinkchange', () => {
@@ -204,7 +208,34 @@ export class Engine {
     if (on === this.autoPan) return
     this.autoPan = on
     for (const ch of this.channels.values()) this.route(ch)
+    this.routePad()
     this.emit()
+  }
+
+  /** Auto Pan applies to a stereo output; a multi-output interface uses each channel's routing. */
+  private get autoPanning() {
+    return this.autoPan && this.outputCount <= 2
+  }
+
+  /**
+   * Where the pad player plays: with the tracks (out the right while Auto Pan is splitting the
+   * output, else Main), through the master fader and limiter.
+   */
+  readonly padInput: GainNode
+
+  private routePad() {
+    this.padInput.disconnect()
+    // After the Fade stage: fading a song out leaves the pad playing.
+    const out = this.output(this.autoPanning ? 'mono:1' : 'main')
+    if (this.autoPanning) {
+      // The master stage of a mono output isn't folded to one channel; fold the pad first.
+      const mono = this.ctx.createGain()
+      mono.channelCount = 1
+      mono.channelCountMode = 'explicit'
+      this.padInput.connect(mono).connect(out.master)
+    } else {
+      this.padInput.connect(out.master)
+    }
   }
 
   setClickSound(sound: ClickSoundName) {
@@ -311,6 +342,8 @@ export class Engine {
     })
     for (const [bus, out] of this.outputs) this.connectOutput(bus, out)
     for (const ch of this.channels.values()) this.route(ch)
+    // Before the constructor has made the pad's input, there's nothing to route yet.
+    if (this.padInput) this.routePad()
   }
 
   private connectOutput(bus: Bus, out: Output) {
@@ -370,7 +403,7 @@ export class Engine {
       ch.gain.connect(ch.panner).connect(this.clickBus.input)
       return
     }
-    const bus = this.autoPan
+    const bus = this.autoPanning
       ? ch.group === 'click' || /guide|cue/i.test(ch.name)
         ? 'mono:0'
         : 'mono:1'
@@ -1102,6 +1135,7 @@ export class Engine {
         }
       }),
       cues: !!this.channels.get('cues')?.buffer,
+      autoPan: this.autoPanning,
       midiOut: this.midiOut,
       groups: this.groupList(),
     }

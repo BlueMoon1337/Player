@@ -149,7 +149,14 @@ export function SettingsDialog(p: Props) {
   const general = (
     <div className="set-columns">
       <div className="set-col">
-        <Row title="Auto Pan" desc="Send Click & Guide to the left output and tracks to the right (for a stereo output)">
+        <Row
+          title="Auto Pan"
+          desc={
+            p.state.outputCount > 2
+              ? `Send Click & Guide to the left and tracks to the right (stereo outputs only; this ${p.state.outputCount}-output device uses Outputs)`
+              : 'Send Click & Guide to the left and tracks to the right (stereo outputs only)'
+          }
+        >
           <Switch label="Auto Pan" on={s.autoPan} set={(v) => setSetting('autoPan', v)} />
         </Row>
         <Row title="Click Sound" desc="Choose a click sound. A song’s own Click Track is chosen in Song Settings ▸ Click.">

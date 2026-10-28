@@ -46,6 +46,7 @@ import { checkForUpdates, startUpdateChecks, useUpdates } from './platform/updat
 // One audio graph for the lifetime of the page.
 const engine = new Engine()
 const pad = new PadPlayer(engine.ctx)
+pad.connectTo(engine.padInput)
 
 const SETTINGS_KEY = 'player.settings.v1'
 

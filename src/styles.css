@@ -2707,6 +2707,8 @@ button.smap-btn:hover {
 }
 .set-outputs {
   flex-direction: column;
+  max-height: none;
+  overflow: visible;
   border-radius: 10px;
 }
 .set-keys {
@@ -2717,4 +2719,19 @@ button.smap-btn:hover {
 }
 .set-row .library-path {
   word-break: break-all;
+}
+
+/* Outputs: what Auto Pan is doing. */
+.panel .panel-note {
+  max-width: 640px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #13263a;
+  color: #cfe3f5;
+  line-height: 1.4;
+}
+
+.bus-auto {
+  color: #9ecbf0;
+  font-size: 12px;
 }

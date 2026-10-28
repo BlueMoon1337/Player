@@ -9,7 +9,10 @@ export type ClickSound = 'classic' | 'woodblock' | 'hihat' | 'beep'
 export type CueLanguage = 'off' | 'en-female' | 'en-male' | 'es' | 'pt' | 'fr'
 
 export interface Settings {
-  /** Click and guide out the left output, everything else out the right (a stereo output). */
+  /**
+   * On a stereo output (headphones, built-in speakers, a 2-output interface): click and guide out
+   * the left, everything else out the right. On by default, as in Playback.
+   */
   autoPan: boolean
   clickSound: ClickSound
   /** Spoken cues count the bar into each section: "Chorus, two, three, four". */
@@ -36,7 +39,7 @@ export interface Settings {
 }
 
 const DEFAULTS: Settings = {
-  autoPan: false,
+  autoPan: true,
   clickSound: 'classic',
   countIntoSections: false,
   sectionPreroll: false,
