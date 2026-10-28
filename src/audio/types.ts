@@ -140,8 +140,9 @@ export function sectionColor(name: string): string {
   if (n.startsWith('pre')) return '#ca8a04'
   if (n.startsWith('chorus')) return '#ea580c'
   if (n.startsWith('bridge')) return '#db2777'
-  if (n.startsWith('tag')) return '#16a34a'
-  if (n.startsWith('turn') || n.startsWith('inst') || n.startsWith('interlude')) return '#0891b2'
+  // Playback colours a turnaround green, like a tag.
+  if (n.startsWith('tag') || n.startsWith('turn')) return '#16a34a'
+  if (n.startsWith('inst') || n.startsWith('interlude')) return '#0891b2'
   if (n.startsWith('outro') || n.startsWith('ending')) return '#7c3aed'
   return '#64748b'
 }
@@ -172,11 +173,15 @@ export function nextSectionName(type: { name: string; numbered: boolean }, secti
 /** The badge on a section, as Playback abbreviates: Verse 1 → V1, Pre-chorus → Pc, Count In → Co, Tag → Ta. */
 export function sectionAbbrev(name: string): string {
   const n = name.trim()
+  // As Playback writes them: Co, I, Pc, Ta (turnaround)…
   const special: [RegExp, string][] = [
     [/^count/i, 'Co'],
+    [/^intro$/i, 'I'],
+    [/^pre[\s-]*chorus$/i, 'Pc'],
     [/^inst/i, 'It'],
     [/^interlude/i, 'Il'],
-    [/^turn/i, 'Tu'],
+    [/^turn/i, 'Ta'],
+    [/^tag$/i, 'Tg'],
   ]
   for (const [re, abbrev] of special) if (re.test(n)) return abbrev
   const num = /^(\S)\S*.*?\s*(\d+)$/.exec(n)

@@ -152,8 +152,10 @@ export async function importStems(
 
   const notes: string[] = []
   if (name?.album) notes.push(`title, album, key and tempo from the name`)
-  if (setMarkers) notes.push(`${setMarkers.markers.length} sections from the Ableton set`)
-  else if (markerSource) notes.push(`${markerSource.markers.length} section markers`)
+  // Counted as they'll appear: a marker past the end of the audio is dropped.
+  const within = (m: { markers: { time: number }[] }) => m.markers.filter((x) => x.time < duration).length
+  if (setMarkers) notes.push(`${within(setMarkers)} sections from the Ableton set`)
+  else if (markerSource) notes.push(`${within(markerSource)} section markers`)
   if (!name?.bpm && (set?.bpm || bpm)) notes.push(`${finalBpm} BPM`)
   if (timeSig && !set?.timeSig) notes.push(`${timeSig[0]}/${timeSig[1]}`)
   if (clickStem) notes.push(`its ${clickStem.name} as the click`)

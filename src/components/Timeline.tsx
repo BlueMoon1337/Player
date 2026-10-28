@@ -207,8 +207,10 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
                 className="section-jump"
                 onClick={() => engine.jumpToSection(s.id, jumpMode)}
                 title={`Jump to ${s.name}${i < 9 ? ` (${i + 1})` : ''}`}
+                data-abbrev={sectionAbbrev(s.name)}
               >
-                {s.name}
+                {/* A narrow section shows its badge abbreviation (V1, Pc) instead of a cut-off name. */}
+                <span className="sj-full">{s.name}</span>
               </button>
               <button
                 className={`section-loop ${looping ? 'on' : ''}`}

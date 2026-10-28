@@ -2454,3 +2454,26 @@ button.smap-btn:hover {
 .ecard[draggable='true'] {
   cursor: grab;
 }
+
+/* Section names on the timeline: the full name where it fits, else the badge abbreviation. */
+.section-label {
+  container-type: inline-size;
+}
+@container (max-width: 96px) {
+  .sj-full {
+    display: none;
+  }
+  .section-jump::after {
+    content: attr(data-abbrev);
+  }
+}
+@container (max-width: 52px) {
+  .section-loop {
+    display: none;
+  }
+  .section-jump {
+    padding: 0 3px;
+    border-radius: 5px;
+    text-overflow: clip;
+  }
+}
