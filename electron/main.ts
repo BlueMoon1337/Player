@@ -361,7 +361,7 @@ function buildMenu() {
         },
         { label: 'Setlists & Library…', accelerator: 'CmdOrCtrl+L', click: () => send('setlists') },
         { label: 'Song Settings…', accelerator: 'CmdOrCtrl+Shift+E', click: () => send('song-settings') },
-        { label: 'Outputs…', accelerator: 'CmdOrCtrl+Shift+O', click: () => send('outputs') },
+        { label: 'Buses…', accelerator: 'CmdOrCtrl+Shift+O', click: () => send('outputs') },
         { label: 'Pad Player', accelerator: 'CmdOrCtrl+Shift+P', click: () => send('pad') },
         sep,
         { role: 'togglefullscreen' },

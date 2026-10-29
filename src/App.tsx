@@ -7,8 +7,8 @@ import { renderDemoStems } from './audio/synth'
 import { type Song, keyRoot, sectionIndexAt } from './audio/types'
 import { AskHost, ContextMenuHost, confirmDelete, isAsking } from './components/Ask'
 import { type LowerView, Mixer } from './components/Mixer'
-import { OutputsDialog, SongSettingsDialog } from './components/Panels'
-import { SettingsDialog } from './components/SettingsDialog'
+import { SongSettingsDialog } from './components/Panels'
+import { SettingsDialog, type SettingsTab } from './components/SettingsDialog'
 import { Setlist } from './components/Setlist'
 import { LibraryPicker } from './components/LibraryPicker'
 import { SetlistsMenu } from './components/SetlistsMenu'
@@ -121,13 +121,13 @@ export default function App() {
   const [addAt, setAddAt] = useState<{ index: number; anchor: DOMRect } | null>(null)
   const [setlistOpen, setSetlistOpen] = useState(true)
   const [setlistsOpen, setSetlistsOpen] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false)
+  /** Settings, open at this tab. */
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null)
   const [updateOpen, setUpdateOpen] = useState(false)
   const updates = useUpdates()
   const updateReady = updates.status === 'available' && updates.found ? updates.found.version : null
   /** The lower part: mixer, buses or pad player (Playback's side buttons). */
   const [lowerView, setLowerView] = useState<LowerView>('mixer')
-  const [outputsOpen, setOutputsOpen] = useState(false)
   const [padOn, setPadOnState] = useState(false)
   const [padKey, setPadKeyState] = useState('C')
   const [padFollow, setPadFollow] = useState(true)
@@ -303,6 +303,7 @@ export default function App() {
     engine.setFaderDefault80(settings.faderDefault80)
     engine.setMidiOut(settings.midiOut)
     engine.sectionPreroll = settings.sectionPreroll
+    engine.setRouting(settings.trackBuses, settings.busOutputs)
   }, [settings])
 
   // Desktop: keep the display awake and guard quitting while audio runs.
@@ -706,11 +707,11 @@ export default function App() {
     else if (cmd === 'song-settings') {
       if (currentId) setSettingsFor(currentId)
     }
-    else if (cmd === 'outputs') setOutputsOpen(true)
+    else if (cmd === 'outputs') setSettingsTab('buses')
     else if (cmd === 'pad') setLowerView('pad')
-    else if (cmd === 'settings') setMenuOpen(true)
+    else if (cmd === 'settings') setSettingsTab('general')
     else if (cmd === 'check-updates') {
-      setMenuOpen(false)
+      setSettingsTab(null)
       setUpdateOpen(true)
       void checkForUpdates()
     }
@@ -797,7 +798,7 @@ export default function App() {
         onSongSettings={() => currentId && setSettingsFor(currentId)}
         setlistsOpen={setlistsOpen}
         onSetlists={() => setSetlistsOpen((v) => !v)}
-        onMore={() => setMenuOpen(true)}
+        onMore={() => setSettingsTab('general')}
         updateReady={!!updateReady}
       />
       {setlistOpen && (
@@ -852,7 +853,7 @@ export default function App() {
             setPadFollow(v)
             if (v && song) setPadKey(keyRoot(song.key))
           }}
-          onOutputs={() => setOutputsOpen(true)}
+          onRouting={setSettingsTab}
           padSound={padSound}
           songPad={song?.pad && padChoices.list.some((x) => x.id === song.pad) ? song.pad : undefined}
           setPadSound={setPadSound}
@@ -861,7 +862,6 @@ export default function App() {
           onDeletePad={desktop ? (x) => void deletePad(x) : undefined}
         />
       </div>
-      {outputsOpen && <OutputsDialog engine={engine} state={state} onClose={() => setOutputsOpen(false)} />}
       {setlistsOpen && (
         <SetlistsMenu
           currentSongId={currentId}
@@ -897,8 +897,10 @@ export default function App() {
           onClose={() => setSettingsFor(null)}
         />
       )}
-      {menuOpen && (
+      {settingsTab && (
         <SettingsDialog
+          tab={settingsTab}
+          setTab={setSettingsTab}
           engine={engine}
           state={state}
           pads={padChoices.list}
@@ -920,14 +922,14 @@ export default function App() {
                   version: updates.version,
                   ready: updateReady,
                   onOpen: () => {
-                    setMenuOpen(false)
+                    setSettingsTab(null)
                     setUpdateOpen(true)
                     if (updates.status !== 'available') void checkForUpdates()
                   },
                 }
               : undefined
           }
-          onClose={() => setMenuOpen(false)}
+          onClose={() => setSettingsTab(null)}
         />
       )}
       {updateOpen && <UpdateDialog playing={state.playing} onClose={() => setUpdateOpen(false)} />}

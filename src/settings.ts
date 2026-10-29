@@ -36,6 +36,12 @@ export interface Settings {
   powerSaver: boolean
   /** Send MIDI (start / stop / program changes) at all. */
   midiOut: boolean
+  /** Settings ▸ Tracks: tracks routed to another bus than Playback's, by track name. */
+  trackBuses: Record<string, string>
+  /** Settings ▸ Buses: the output each bus goes to (Main 1/2 when not set). */
+  busOutputs: Record<string, string>
+  /** Settings ▸ Buses: buses given another name. */
+  busNames: Record<string, string>
 }
 
 const DEFAULTS: Settings = {
@@ -52,6 +58,9 @@ const DEFAULTS: Settings = {
   faderDefault80: false,
   powerSaver: false,
   midiOut: true,
+  trackBuses: {},
+  busOutputs: {},
+  busNames: {},
 }
 
 const KEY = 'player.prefs.v1'
@@ -61,7 +70,11 @@ function load(): Settings {
     const saved = JSON.parse(localStorage.getItem(KEY) || '{}')
     const out = { ...DEFAULTS }
     for (const k of Object.keys(DEFAULTS) as (keyof Settings)[]) {
-      if (typeof saved[k] === typeof DEFAULTS[k]) (out as Record<string, unknown>)[k] = saved[k]
+      const v = saved[k]
+      if (typeof v !== typeof DEFAULTS[k] || v === null || Array.isArray(v) !== Array.isArray(DEFAULTS[k])) continue
+      // A table of names: only its string entries.
+      ;(out as Record<string, unknown>)[k] =
+        typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([, x]) => typeof x === 'string')) : v
     }
     return out
   } catch {

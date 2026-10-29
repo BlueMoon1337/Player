@@ -2,9 +2,14 @@ import { type ReactNode, useEffect, useState } from 'react'
 import type { Engine, EngineState, JumpMode } from '../audio/engine'
 import { desktop } from '../platform'
 import { type ClickSound, type CueLanguage, setSetting, useSettings } from '../settings'
-import { OutputsPanel, useAudioDevices } from './Panels'
+import { useAudioDevices } from './Panels'
+import { BusesTab, TracksTab } from './RoutingTabs'
+
+export type SettingsTab = 'general' | 'tracks' | 'buses' | 'about'
 
 interface Props {
+  tab: SettingsTab
+  setTab: (t: SettingsTab) => void
   engine: Engine
   state: EngineState
   /** The pads to choose the Default Ambient Pad from, and the chosen one. */
@@ -26,8 +31,6 @@ interface Props {
   update?: { version: string | null; ready: string | null; onOpen: () => void }
   onClose: () => void
 }
-
-type Tab = 'general' | 'outputs' | 'about'
 
 const CLICK_SOUNDS: [ClickSound, string][] = [
   ['classic', 'Classic'],
@@ -130,10 +133,10 @@ function AudioDeviceChoice({ engine, state }: { engine: Engine; state: EngineSta
   )
 }
 
-/** Settings, laid out like Playback's: General, Outputs and About. */
+/** Settings, laid out like Playback's: General, Tracks, Buses and About. */
 export function SettingsDialog(p: Props) {
   const s = useSettings()
-  const [tab, setTab] = useState<Tab>('general')
+  const { tab, setTab } = p
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -153,7 +156,7 @@ export function SettingsDialog(p: Props) {
           title="Auto Pan"
           desc={
             p.state.outputCount > 2
-              ? `Send Click & Guide to the left and tracks to the right (stereo outputs only; this ${p.state.outputCount}-output device uses Outputs)`
+              ? `Send Click & Guide to the left and tracks to the right (stereo outputs only; this ${p.state.outputCount}-output device uses Buses)`
               : 'Send Click & Guide to the left and tracks to the right (stereo outputs only)'
           }
         >
@@ -306,9 +309,10 @@ export function SettingsDialog(p: Props) {
             {(
               [
                 ['general', 'General'],
-                ['outputs', 'Outputs'],
+                ['tracks', 'Tracks'],
+                ['buses', 'Buses'],
                 ['about', 'About'],
-              ] as [Tab, string][]
+              ] as [SettingsTab, string][]
             ).map(([t, name]) => (
               <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
                 {name}
@@ -321,11 +325,8 @@ export function SettingsDialog(p: Props) {
         </header>
         <div className="set-body">
           {tab === 'general' && general}
-          {tab === 'outputs' && (
-            <div className="panel set-outputs">
-              <OutputsPanel engine={p.engine} state={p.state} />
-            </div>
-          )}
+          {tab === 'tracks' && <TracksTab state={p.state} />}
+          {tab === 'buses' && <BusesTab state={p.state} />}
           {tab === 'about' && about}
         </div>
       </div>

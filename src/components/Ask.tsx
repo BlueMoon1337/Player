@@ -20,7 +20,7 @@ export interface PromptOptions extends AskOptions {
 }
 
 interface Pending extends PromptOptions {
-  kind: 'confirm' | 'prompt'
+  kind: 'confirm' | 'prompt' | 'alert'
   seq: number
   /** The text typed for a prompt, '' for yes to a confirm, null for Cancel. */
   resolve: (answer: string | null) => void
@@ -44,6 +44,9 @@ function ask(kind: Pending['kind'], options: PromptOptions): Promise<string | nu
 
 /** Asks a yes-or-no question; true for yes. */
 export const confirmDialog = (options: AskOptions) => ask('confirm', options).then((a) => a !== null)
+
+/** Tells something, with just OK. */
+export const alertDialog = (options: AskOptions) => ask('alert', options).then(() => undefined)
 
 /** A delete asks twice: what goes, then "Are you sure?". */
 export async function confirmDelete(options: AskOptions, what: string): Promise<boolean> {
@@ -112,7 +115,7 @@ function AskBox({ ask }: { ask: Pending }) {
         )}
         <div className="dialog-actions">
           <span className="dialog-actions-spacer" />
-          <button onClick={() => answer(null)}>Cancel</button>
+          {ask.kind !== 'alert' && <button onClick={() => answer(null)}>Cancel</button>}
           <button
             ref={confirmRef}
             className={ask.danger ? 'destructive' : 'primary'}
@@ -151,6 +154,22 @@ const setMenu = (m: typeof openMenu) => {
 export function showContextMenu(e: { clientX: number; clientY: number; preventDefault(): void }, items: MenuEntry[]) {
   e.preventDefault()
   setMenu({ x: e.clientX, y: e.clientY, items })
+}
+
+/** Keeps a submenu on screen: up from the bottom edge, or to the left at the right edge. */
+function fitSubmenu(e: React.MouseEvent<HTMLDivElement>) {
+  const sub = e.currentTarget.querySelector<HTMLElement>(':scope > .ctx-submenu')
+  if (!sub) return
+  sub.style.top = ''
+  sub.style.left = ''
+  sub.style.right = ''
+  const r = sub.getBoundingClientRect()
+  const over = r.bottom - (window.innerHeight - 4)
+  if (over > 0) sub.style.top = `${-5 - Math.min(over, r.top - 4)}px`
+  if (r.right > window.innerWidth - 4) {
+    sub.style.left = 'auto'
+    sub.style.right = '100%'
+  }
 }
 
 export function ContextMenuHost() {
@@ -193,7 +212,7 @@ export function ContextMenuHost() {
       it === 'separator' ? (
         <div key={i} className="ctx-sep" />
       ) : it.submenu ? (
-        <div key={i} className={`ctx-item has-sub ${it.disabled ? 'disabled' : ''}`}>
+        <div key={i} className={`ctx-item has-sub ${it.disabled ? 'disabled' : ''}`} onMouseEnter={fitSubmenu}>
           <span>{it.label}</span>
           <span className="ctx-hint">▸</span>
           {!it.disabled && <div className="ctx-menu ctx-submenu">{render(it.submenu)}</div>}

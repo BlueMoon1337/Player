@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { type Engine, type EngineState, type GroupSettings, type LoopMode, faderToDb } from '../audio/engine'
 import { PAD_SOUNDS, type ImportedPad, type PadPlayer } from '../audio/pad'
+import { type BusId, TRACK_BUSES, busName, defaultTrackBus } from '../audio/routing'
 import { type Bus, type ChannelSettings, type Song, busLabel, busOptions, sectionIndexAt } from '../audio/types'
 import { type MenuEntry, showContextMenu } from './Ask'
-import { getSettings, useSettings } from '../settings'
+import { busSettingsLocked } from './RoutingTabs'
+import { getSettings, setSetting, useSettings } from '../settings'
 import { Fader } from './Fader'
 import { LoopForeverIcon, LoopOnceIcon } from './LoopIcons'
 
@@ -37,7 +39,8 @@ interface Props {
   onImportPads: () => void
   /** Desktop: deletes an imported pad (asking first). */
   onDeletePad?: (pad: ImportedPad) => void
-  onOutputs: () => void
+  /** Opens Settings at Tracks (a track's bus) or Buses (a bus's output). */
+  onRouting: (tab: 'tracks' | 'buses') => void
 }
 
 /** Playback's key layout: the flats above, the naturals below. */
@@ -166,24 +169,50 @@ export function Mixer(p: Props) {
   const [openBuses, setOpenBuses] = useState<Set<string>>(new Set())
   const [padVolume, setPadVolume] = useState(pad.volume)
 
-  const routeMenu = (current: Bus, apply: (b: Bus) => void): MenuEntry[] => {
-    const options = busOptions(state.outputCount)
-    return [
-      { label: 'Output', submenu: options.map((b) => ({ label: `${b === current ? '✓ ' : ''}${busLabel(b)}`, onClick: () => apply(b) })) },
-      { label: 'Outputs…', onClick: p.onOutputs },
-    ]
-  }
+  // Under Auto Pan the click and guide go out the left, everything else the right.
+  const routeTag = (output: Bus | null) =>
+    !output ? undefined : state.autoPan ? (output === 'mono:0' ? 'L' : 'R') : shortRoute(output)
+
+  /** A bus's output (Settings ▸ Buses). */
+  const outputMenu = (id: BusId, current: Bus | null): MenuEntry[] => [
+    state.autoPan
+      ? { label: 'Output', onClick: () => void busSettingsLocked() }
+      : {
+          label: 'Output',
+          submenu: busOptions(state.outputCount).map((b) => ({
+            label: `${b === current ? '✓ ' : ''}${busLabel(b)}`,
+            onClick: () => setSetting('busOutputs', { ...getSettings().busOutputs, [id]: b }),
+          })),
+        },
+    { label: 'Buses…', onClick: () => p.onRouting('buses') },
+  ]
+
+  /** The bus a track goes to (Settings ▸ Tracks): for this track name in every song. */
+  const trackMenu = (name: string, current: BusId | null): MenuEntry[] => [
+    {
+      label: 'Bus',
+      submenu: TRACK_BUSES.map((b) => ({
+        label: `${b.id === current ? '✓ ' : ''}${busName(b.id, settings.busNames)}`,
+        onClick: () => {
+          const { [name]: _, ...rest } = getSettings().trackBuses
+          setSetting('trackBuses', b.id === defaultTrackBus(name) ? rest : { ...rest, [name]: b.id })
+        },
+      })),
+    },
+    { label: 'Tracks…', onClick: () => p.onRouting('tracks') },
+  ]
 
   const channelStrip = (c: EngineState['channels'][number], className = '', extra: Partial<StripProps> = {}) => {
     const set = (patch: Partial<ChannelSettings>) => engine.setChannel(c.id, patch)
     const s = c.settings
-    const routable = c.group === 'stem' || c.id === 'click'
+    // A muted bus shows its tracks muted too.
+    const busMuted = !!c.busGroup && !!state.groups.find((g) => g.id === c.busGroup)?.settings.mute
     return (
       <Strip
         key={c.id}
         id={c.id}
         name={c.name}
-        className={`${c.group} ${className}`}
+        className={`${c.group} ${className} ${busMuted ? 'bus-muted' : ''}`}
         volume={s.volume}
         mute={s.mute}
         solo={s.solo}
@@ -191,20 +220,13 @@ export function Mixer(p: Props) {
         onMute={() => set({ mute: !s.mute })}
         onSolo={() => set({ solo: !s.solo })}
         meter={meter(c.group === 'click' && c.id !== 'cues' ? () => clickMeter(engine, c.id) : () => engine.meter(c.id))}
-        route={
-          !routable
-            ? undefined
-            : state.autoPan
-              ? c.group === 'click' || /guide|cue/i.test(c.name)
-                ? 'L'
-                : 'R'
-              : shortRoute(s.bus)
-        }
+        route={routeTag(c.output)}
         menu={() => [
           { label: s.mute ? 'Unmute' : 'Mute', onClick: () => set({ mute: !s.mute }) },
           { label: s.solo ? 'Unsolo' : 'Solo', onClick: () => set({ solo: !s.solo }) },
           { label: 'Reset Volume', onClick: () => set({ volume: 0.75 }) },
-          ...(routable ? (['separator', ...routeMenu(s.bus, (b) => set({ bus: b }))] as MenuEntry[]) : []),
+          ...(c.group === 'stem' ? (['separator', ...trackMenu(c.name, c.busGroup)] as MenuEntry[]) : []),
+          ...(c.id === 'click' ? (['separator', ...outputMenu('click', c.output)] as MenuEntry[]) : []),
         ]}
         {...extra}
       />
@@ -327,50 +349,49 @@ export function Mixer(p: Props) {
       </div>
     )
   } else if (view === 'buses') {
-    const setGroup = (name: string, patch: Partial<GroupSettings>) => engine.setGroup(name, patch)
+    const setGroup = (id: BusId, patch: Partial<GroupSettings>) => engine.setGroup(id, patch)
     main = (
       <div className="mixer-strips buses-view">
         {clickBus && <div className="strip-group click-group">{channelStrip(clickBus, 'bus')}</div>}
         {state.groups.length ? (
           <div className="strip-group stem-group">
             {state.groups.map((g) => {
-              const open = openBuses.has(g.name)
+              const open = openBuses.has(g.id)
+              const name = busName(g.id, settings.busNames, true)
               const members = g.members
                 .map((id) => state.channels.find((c) => c.id === id)!)
                 .filter((c) => c && (settings.referenceTrack || !c.reference))
-              const routes = new Set(members.map((c) => c.settings.bus))
-              const route = routes.size === 1 ? [...routes][0] : null
               return (
-                <div key={g.name} className={`bus-wrap ${open ? 'open' : ''}`}>
+                <div key={g.id} className={`bus-wrap ${open ? 'open' : ''}`}>
                   <Strip
-                    id={`bus:${g.name}`}
-                    name={g.name}
+                    id={`bus:${g.id}`}
+                    name={name}
                     className="stem bus"
                     cyan
                     volume={g.settings.volume}
                     mute={g.settings.mute}
                     solo={g.settings.solo}
-                    onVolume={(v) => setGroup(g.name, { volume: v })}
-                    onMute={() => setGroup(g.name, { mute: !g.settings.mute })}
-                    onSolo={() => setGroup(g.name, { solo: !g.settings.solo })}
-                    meter={meter(() => engine.groupMeter(g.name))}
-                    route={route ? shortRoute(route) : 'mixed'}
+                    onVolume={(v) => setGroup(g.id, { volume: v })}
+                    onMute={() => setGroup(g.id, { mute: !g.settings.mute })}
+                    onSolo={() => setGroup(g.id, { solo: !g.settings.solo })}
+                    meter={meter(() => engine.groupMeter(g.id))}
+                    route={routeTag(g.output)}
                     expand={{
                       open,
                       label: members.length === 1 ? 'its track' : `its ${members.length} tracks`,
                       toggle: () => {
                         const next = new Set(openBuses)
-                        if (open) next.delete(g.name)
-                        else next.add(g.name)
+                        if (open) next.delete(g.id)
+                        else next.add(g.id)
                         setOpenBuses(next)
                       },
                     }}
                     menu={() => [
-                      { label: g.settings.mute ? 'Unmute' : 'Mute', onClick: () => setGroup(g.name, { mute: !g.settings.mute }) },
-                      { label: g.settings.solo ? 'Unsolo' : 'Solo', onClick: () => setGroup(g.name, { solo: !g.settings.solo }) },
-                      { label: 'Reset Volume', onClick: () => setGroup(g.name, { volume: 0.75 }) },
+                      { label: g.settings.mute ? 'Unmute' : 'Mute', onClick: () => setGroup(g.id, { mute: !g.settings.mute }) },
+                      { label: g.settings.solo ? 'Unsolo' : 'Solo', onClick: () => setGroup(g.id, { solo: !g.settings.solo }) },
+                      { label: 'Reset Volume', onClick: () => setGroup(g.id, { volume: 0.75 }) },
                       'separator',
-                      ...routeMenu(route ?? 'main', (b) => members.forEach((c) => engine.setChannel(c.id, { bus: b }))),
+                      ...outputMenu(g.id, g.output),
                     ]}
                   />
                   {open && <div className="strip-sub">{members.map((c) => channelStrip(c, 'sub'))}</div>}

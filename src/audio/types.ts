@@ -106,21 +106,11 @@ export interface ChannelSettings {
   volume: number
   mute: boolean
   solo: boolean
-  bus: Bus
 }
 
 /** A stem that's the original recording, for reference (Settings ▸ Reference Track). */
 export function isReferenceName(name: string): boolean {
   return /^(ref|reference|reference mix|ref mix|original|original mix|full mix)( \d+)?$/i.test(name.trim())
-}
-
-/** The bus a stem is grouped under in the Buses view: "EG 1" and "EG 2" → "EG", "Drums (Live)" → "Drums". */
-export function busGroupName(name: string): string {
-  const n = name
-    .replace(/\s*\([^)]*\)\s*/g, ' ')
-    .replace(/[\s_-]*\d+$/, '')
-    .trim()
-  return n || name
 }
 
 export const KEYS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'] as const

@@ -1,16 +1,6 @@
+import { BUSES, type BusId, autoPanOutput, busOutput, trackBus } from './routing'
 import { type ClickSoundName, barLength, renderClick } from './synth'
-import {
-  type Bus,
-  type ChannelSettings,
-  CLICK_CHANNELS,
-  type Song,
-  busGroupName,
-  busTopChannel,
-  isReferenceName,
-  normalizeBus,
-  parseBus,
-  sectionEnd,
-} from './types'
+import { type Bus, type ChannelSettings, CLICK_CHANNELS, type Song, busTopChannel, isReferenceName, parseBus, sectionEnd } from './types'
 
 export type JumpMode = 'immediate' | 'bar' | 'section'
 
@@ -27,8 +17,8 @@ interface Channel {
   settings: ChannelSettings
   /** One of the loaded song's stems (removed when another song loads). */
   fromSong: boolean
-  /** The bus it's grouped under in the Buses view (stems only): "EG 1" → "EG". */
-  busGroup: string | null
+  /** The bus it goes to (stems only), by its name: Settings ▸ Tracks. */
+  busGroup: BusId | null
 }
 
 /** A bus in the Buses view: a fader, mute and solo over a group of stems. */
@@ -72,7 +62,9 @@ export interface EngineState {
     id: string
     name: string
     group: 'click' | 'stem'
-    busGroup: string | null
+    busGroup: BusId | null
+    /** The output it plays out of (click and stems; the click's parts go with the click). */
+    output: Bus | null
     /** The song's reference (original) recording. */
     reference: boolean
     settings: ChannelSettings
@@ -83,8 +75,8 @@ export interface EngineState {
   autoPan: boolean
   /** Settings ▸ MIDI Out. */
   midiOut: boolean
-  /** The loaded song's buses (stems grouped by name), in mixer order. */
-  groups: { name: string; settings: GroupSettings; members: string[] }[]
+  /** The loaded song's buses (with their stems), in Playback's bus order. */
+  groups: { id: BusId; settings: GroupSettings; members: string[]; output: Bus }[]
   masterVolume: number
   /** Channels on the current output device (2 for plain stereo). */
   outputCount: number
@@ -99,7 +91,7 @@ const OUTPUT_KEY = 'player.output.v1'
 
 type SinkContext = AudioContext & { setSinkId?: (id: string) => Promise<void> }
 
-const DEFAULT_SETTINGS: ChannelSettings = { volume: 0.75, mute: false, solo: false, bus: 'main' }
+const DEFAULT_SETTINGS: ChannelSettings = { volume: 0.75, mute: false, solo: false }
 const GROUP_PREFIX = 'bus:'
 
 /** Fader position (0..1) to linear gain. 0.75 is unity, 1.0 is about +6 dB. */
@@ -176,6 +168,9 @@ export class Engine {
   private songBuses = false
   private songMaster = false
   private hideReference = false
+  /** Settings ▸ Tracks and ▸ Buses: tracks routed to other buses, and the buses' outputs. */
+  private trackBuses: Record<string, string> = {}
+  private busOutputs: Record<string, string> = {}
   /** A song's channels start here when they have no saved level (Fader Default Level 80%). */
   private defaultVolume = 0.75
   /** Playing from the start of a section gives a bar of count-in with the tracks fading in. */
@@ -226,8 +221,9 @@ export class Engine {
   private routePad() {
     this.padInput.disconnect()
     // After the Fade stage: fading a song out leaves the pad playing.
-    const out = this.output(this.autoPanning ? 'mono:1' : 'main')
-    if (this.autoPanning) {
+    const bus = this.busRoute('pad')
+    const out = this.output(bus)
+    if (parseBus(bus).kind === 'mono') {
       // The master stage of a mono output isn't folded to one channel; fold the pad first.
       const mono = this.ctx.createGain()
       mono.channelCount = 1
@@ -250,6 +246,18 @@ export class Engine {
     if (ch.buffer === buffer) return
     ch.buffer = buffer
     if (this.playing) this.seek(this.position)
+    this.emit()
+  }
+
+  /** Settings ▸ Tracks and ▸ Buses: which bus each track goes to, and each bus's output. */
+  setRouting(trackBuses: Record<string, string>, busOutputs: Record<string, string>) {
+    if (trackBuses === this.trackBuses && busOutputs === this.busOutputs) return
+    this.trackBuses = trackBuses
+    this.busOutputs = busOutputs
+    for (const ch of this.channels.values()) if (ch.group === 'stem') ch.busGroup = trackBus(ch.name, trackBuses)
+    this.reloadGroups()
+    for (const ch of this.channels.values()) this.route(ch)
+    this.routePad()
     this.emit()
   }
 
@@ -394,6 +402,17 @@ export class Engine {
     return busTopChannel(bus) < this.outputCount ? bus : 'main'
   }
 
+  /** Where a bus plays out: as Auto Pan splits a stereo output, else its output in Settings ▸ Buses. */
+  private busRoute(id: BusId): Bus {
+    return this.autoPanning ? autoPanOutput(id) : this.effectiveBus(busOutput(id, this.busOutputs))
+  }
+
+  /** The output a channel plays out of; the click's parts go through the Click channel. */
+  private channelOutput(ch: Channel): Bus | null {
+    if (ch.group === 'click' && ch.id !== 'click') return null
+    return this.busRoute(ch.id === 'click' ? 'click' : (ch.busGroup ?? 'aux'))
+  }
+
   private route(ch: Channel) {
     ch.gain.disconnect()
     ch.panner.disconnect()
@@ -403,11 +422,7 @@ export class Engine {
       ch.gain.connect(ch.panner).connect(this.clickBus.input)
       return
     }
-    const bus = this.autoPanning
-      ? ch.group === 'click' || /guide|cue/i.test(ch.name)
-        ? 'mono:0'
-        : 'mono:1'
-      : this.effectiveBus(ch.settings.bus)
+    const bus = this.channelOutput(ch)!
     if (parseBus(bus).kind === 'mono') ch.gain.connect(this.output(bus).input)
     else ch.gain.connect(ch.panner).connect(this.output(bus).input)
   }
@@ -472,10 +487,9 @@ export class Engine {
         volume: fromSong ? this.defaultVolume : DEFAULT_SETTINGS.volume,
         ...saved,
         solo: false,
-        bus: normalizeBus(saved.bus ?? 'main'),
       },
       fromSong,
-      busGroup: group === 'stem' ? busGroupName(name) : null,
+      busGroup: group === 'stem' ? trackBus(name, this.trackBuses) : null,
     }
     if (ch.busGroup && !this.groups.has(ch.busGroup)) {
       const g = loadMix()[this.groupKey(ch.busGroup)] ?? {}
@@ -512,7 +526,7 @@ export class Engine {
   private saveMix() {
     const out: Record<string, Partial<ChannelSettings>> = loadMix()
     for (const ch of this.channels.values()) {
-      out[ch.id] = { volume: ch.settings.volume, mute: ch.settings.mute, bus: ch.settings.bus }
+      out[ch.id] = { volume: ch.settings.volume, mute: ch.settings.mute }
     }
     for (const [name, g] of this.groups) out[this.groupKey(name)] = { volume: g.volume, mute: g.mute }
     out[this.masterKey()] = { volume: this.masterVolume }
@@ -527,17 +541,16 @@ export class Engine {
     const ch = this.channels.get(id)
     if (!ch) return
     ch.settings = { ...ch.settings, ...patch }
-    if (patch.bus !== undefined) this.route(ch)
     this.applyGains()
     this.saveMix()
     this.emit()
   }
 
   /** A bus in the Buses view: its fader, mute and solo apply on top of its stems' own. */
-  setGroup(name: string, patch: Partial<GroupSettings>) {
-    const g = this.groups.get(name)
+  setGroup(id: BusId, patch: Partial<GroupSettings>) {
+    const g = this.groups.get(id)
     if (!g) return
-    this.groups.set(name, { ...g, ...patch })
+    this.groups.set(id, { ...g, ...patch })
     this.applyGains()
     this.saveMix()
     this.emit()
@@ -558,10 +571,10 @@ export class Engine {
   }
 
   /** A bus's level: the loudest of its stems. */
-  groupMeter(name: string): number {
+  groupMeter(id: BusId): number {
     if (!this.playing) return 0
     let peak = 0
-    for (const ch of this.channels.values()) if (ch.busGroup === name) peak = Math.max(peak, peakOf(ch.analyser))
+    for (const ch of this.channels.values()) if (ch.busGroup === id) peak = Math.max(peak, peakOf(ch.analyser))
     return peak
   }
 
@@ -1106,11 +1119,12 @@ export class Engine {
     for (const id of this.order) {
       const c = this.channels.get(id)!
       if (!c.busGroup) continue
-      let g = out.find((x) => x.name === c.busGroup)
-      if (!g) out.push((g = { name: c.busGroup, settings: this.groups.get(c.busGroup)!, members: [] }))
+      let g = out.find((x) => x.id === c.busGroup)
+      if (!g) out.push((g = { id: c.busGroup, settings: this.groups.get(c.busGroup)!, members: [], output: this.busRoute(c.busGroup) }))
       g.members.push(c.id)
     }
-    return out
+    const rank = (id: BusId) => BUSES.findIndex((b) => b.id === id)
+    return out.sort((a, b) => rank(a.id) - rank(b.id))
   }
 
   private buildState(): EngineState {
@@ -1130,6 +1144,7 @@ export class Engine {
           name: c.name,
           group: c.group,
           busGroup: c.busGroup,
+          output: this.channelOutput(c),
           reference: c.group === 'stem' && isReferenceName(c.name),
           settings: c.settings,
         }
