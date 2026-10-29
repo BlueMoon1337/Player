@@ -154,11 +154,7 @@ export function SettingsDialog(p: Props) {
       <div className="set-col">
         <Row
           title="Auto Pan"
-          desc={
-            p.state.outputCount > 2
-              ? `Send Click & Guide to the left and tracks to the right (stereo outputs only; this ${p.state.outputCount}-output device uses Buses)`
-              : 'Send Click & Guide to the left and tracks to the right (stereo outputs only)'
-          }
+          desc="Send Click & Guide to output 1 (left) and tracks to output 2 (right). Turn it off to route buses in the Buses tab"
         >
           <Switch label="Auto Pan" on={s.autoPan} set={(v) => setSetting('autoPan', v)} />
         </Row>

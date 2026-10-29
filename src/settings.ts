@@ -10,8 +10,8 @@ export type CueLanguage = 'off' | 'en-female' | 'en-male' | 'es' | 'pt' | 'fr'
 
 export interface Settings {
   /**
-   * On a stereo output (headphones, built-in speakers, a 2-output interface): click and guide out
-   * the left, everything else out the right. On by default, as in Playback.
+   * Click and guide out output 1 (the left), everything else out output 2 (the right), on any
+   * device; the bus routing in Settings ▸ Buses waits until it's off. On by default, as in Playback.
    */
   autoPan: boolean
   clickSound: ClickSound

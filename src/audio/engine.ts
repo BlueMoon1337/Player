@@ -71,7 +71,7 @@ export interface EngineState {
   }[]
   /** Spoken section cues are made for the loaded song. */
   cues: boolean
-  /** Auto Pan is splitting a stereo output: click and guide left, tracks right. */
+  /** Auto Pan is on: click and guide out 1 (left), tracks out 2 (right). */
   autoPan: boolean
   /** Settings ▸ MIDI Out. */
   midiOut: boolean
@@ -207,9 +207,9 @@ export class Engine {
     this.emit()
   }
 
-  /** Auto Pan applies to a stereo output; a multi-output interface uses each channel's routing. */
+  /** Auto Pan holds on any device, as in Playback: Settings ▸ Buses routes once it's off. */
   private get autoPanning() {
-    return this.autoPan && this.outputCount <= 2
+    return this.autoPan
   }
 
   /**
@@ -402,7 +402,7 @@ export class Engine {
     return busTopChannel(bus) < this.outputCount ? bus : 'main'
   }
 
-  /** Where a bus plays out: as Auto Pan splits a stereo output, else its output in Settings ▸ Buses. */
+  /** Where a bus plays out: as Auto Pan splits it, else its output in Settings ▸ Buses. */
   private busRoute(id: BusId): Bus {
     return this.autoPanning ? autoPanOutput(id) : this.effectiveBus(busOutput(id, this.busOutputs))
   }
