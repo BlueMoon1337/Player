@@ -2753,6 +2753,9 @@ button.smap-btn:hover {
 .set-lists {
   align-items: start;
 }
+.set-autopan .set-row {
+  min-height: 64px;
+}
 .set-list {
   padding: 0 20px;
 }

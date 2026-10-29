@@ -255,6 +255,28 @@ export function BusesTab({ state }: { state: EngineState }) {
   const left = BUSES.findIndex((b) => b.id === 'ag')
   return (
     <div className="set-routing">
+      <div className="set-col set-autopan">
+        <div className="set-row">
+          <div className="set-text">
+            <div className="set-title">Auto Pan</div>
+            <div className="set-desc">
+              {s.autoPan
+                ? 'Click & Guide go out 1 (left) and everything else out 2 (right). Turn it off to route each bus'
+                : 'Each bus goes out the output chosen below. Turn it on to send Click & Guide out 1 and the rest out 2'}
+            </div>
+          </div>
+          <div className="set-control">
+            <input
+              type="checkbox"
+              role="switch"
+              className="switch set-switch"
+              aria-label="Auto Pan"
+              checked={s.autoPan}
+              onChange={(e) => setSetting('autoPan', e.target.checked)}
+            />
+          </div>
+        </div>
+      </div>
       <Columns
         items={[...BUSES]}
         split={left}
@@ -283,7 +305,7 @@ export function BusesTab({ state }: { state: EngineState }) {
       />
       {locked && (
         <p className="set-note">
-          <b>Auto Pan is on</b> (General): click, guide and cues go out output 1 (left), mixed to mono, and all tracks and the
+          <b>Auto Pan is on</b>: click, guide and cues go out output 1 (left), mixed to mono, and all tracks and the
           pad out output 2 (right). Use a 1/8&quot; TRS to dual 1/4&quot; TS cable and direct boxes (or two line inputs) to send
           each side to the sound system: the left to the in-ears, the right to front of house.
         </p>
