@@ -2076,6 +2076,52 @@ button.smap-btn:hover {
   padding: 10px 14px 10px 4px;
   background: #0a0b0d;
 }
+.timeline.song-map.scoped {
+  grid-template-rows: auto minmax(0, 1fr);
+  padding-top: 6px;
+}
+/* Edit mode: where section changes go (this setlist, or every setlist). */
+.smap-scope {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 0 6px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.smap-scope-seg {
+  display: flex;
+  padding: 2px;
+  border-radius: 7px;
+  background: #1c1e23;
+}
+.smap-scope-seg button {
+  max-width: 220px;
+  padding: 2px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #b4b8c0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.smap-scope-seg button.on {
+  background: var(--accent-dim);
+  color: #fff;
+}
+.smap-scope-note {
+  color: #fbbf24;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.smap-scope-act {
+  padding: 2px 9px;
+  font-size: 12px;
+}
 .smap-add-start {
   position: relative;
   align-self: center;

@@ -1,10 +1,12 @@
 /**
- * Undo for song edits (title, artist, album, key, tempo, time signature, click offset, sections). Each edit
+ * Undo for song edits (title, artist, album, key, tempo, time signature, click offset, sections,
+ * and which setlists have their own edit of the sections). Each edit
  * records the song's editable fields before and after; undo puts them back. Typing into one
  * field joins into a single step (history.ts).
  */
 import type { Section, Song } from '../audio/types'
 import { record } from './history'
+import { getLibrary, setSetlistSections } from './store'
 
 interface SongSnapshot {
   title: string
@@ -17,6 +19,9 @@ interface SongSnapshot {
   clickStem: string | null
   pad: string | undefined
   sections: Section[]
+  /** The song's own sections, and each setlist's edit of them (by setlist id). */
+  own: Section[] | undefined
+  inSetlists: Record<string, Section[]>
 }
 
 function snapshot(song: Song): SongSnapshot {
@@ -31,6 +36,12 @@ function snapshot(song: Song): SongSnapshot {
     clickStem: song.clickStem ?? null,
     pad: song.pad,
     sections: song.sections.map((s) => ({ ...s })),
+    own: song.librarySections?.map((s) => ({ ...s })),
+    inSetlists: Object.fromEntries(
+      getLibrary()
+        .setlists.filter((sl) => sl.sections?.[song.id])
+        .map((sl) => [sl.id, sl.sections![song.id].map((s) => ({ ...s }))]),
+    ),
   }
 }
 
@@ -65,7 +76,12 @@ function apply(song: Song, snap: SongSnapshot, kind: ChangeKind) {
     clickStem: snap.clickStem,
     pad: snap.pad,
     sections: snap.sections.map((s) => ({ ...s })),
+    librarySections: snap.own?.map((s) => ({ ...s })),
   })
+  for (const sl of getLibrary().setlists) {
+    const want = snap.inSetlists[sl.id] ?? null
+    if (JSON.stringify(sl.sections?.[song.id] ?? null) !== JSON.stringify(want)) setSetlistSections(sl.id, song.id, want)
+  }
   changed(song, kind)
 }
 
@@ -76,10 +92,12 @@ function apply(song: Song, snap: SongSnapshot, kind: ChangeKind) {
 export function editSong(song: Song, label: string, change: () => void, mergeKey?: string) {
   const before = snapshot(song)
   change()
-  const after = snapshot(song)
-  if (same(before, after)) return
-  const kind = kindOf(before, after)
+  const made = snapshot(song)
+  if (same(before, made)) return
+  const kind = kindOf(before, made)
   changed(song, kind)
+  // After the change has been filed with its setlist (App's onSongChanged), so redo puts that back too.
+  const after = snapshot(song)
   record({
     label,
     mergeKey: mergeKey ? `${song.id}:${mergeKey}` : undefined,

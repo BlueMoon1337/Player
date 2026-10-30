@@ -153,6 +153,15 @@ export function setSetlistSections(setlistId: string, songId: string, sections: 
   })
 }
 
+/**
+ * Makes a song's sections its own, for every setlist: the setlists' own edits of them are dropped.
+ * Call it inside a song edit (editSong), which makes it one undoable step.
+ */
+export function setSectionsEverywhere(song: Song) {
+  song.librarySections = song.sections.map((x) => ({ ...x }))
+  for (const sl of state.setlists) if (sl.sections?.[song.id]) setSetlistSections(sl.id, song.id, null)
+}
+
 /** The setlists a song is in. */
 export function setlistsWith(songId: string, s = state): Setlist[] {
   return s.setlists.filter((sl) => sl.songs.includes(songId))

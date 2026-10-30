@@ -26,6 +26,7 @@ import {
   onSaveError,
   removeFromSetlist,
   setlistSongs,
+  setSectionsEverywhere,
   setSetlistSections,
   setSongEnd,
   setlistSections,
@@ -148,7 +149,27 @@ export default function App() {
   const peaks = useRef(new Map<string, Float32Array>())
   const saveTimers = useRef(new Map<string, number>())
 
-  const setEditing = (on: boolean) => setEditingState(on)
+  /**
+   * Where section changes go: the current setlist only, unless told every setlist. Back to this
+   * setlist only each time Edit mode ends.
+   */
+  const [sectionScope, setSectionScope] = useState<'setlist' | 'all'>('setlist')
+  const setEditing = (on: boolean) => {
+    setEditingState(on)
+    if (!on) setSectionScope('setlist')
+  }
+  /** An undoable edit to a song; with every setlist chosen, a change to its sections goes to all of them. */
+  const editInScope = (target: Song, label: string, change: () => void, field?: string) =>
+    editSong(
+      target,
+      label,
+      () => {
+        const before = JSON.stringify(target.sections)
+        change()
+        if (sectionScope === 'all' && JSON.stringify(target.sections) !== before) setSectionsEverywhere(target)
+      },
+      field,
+    )
 
   useEffect(() => {
     try {
@@ -828,7 +849,22 @@ export default function App() {
         jumpMode={jumpMode}
         version={version}
         editing={editing}
-        edit={song ? (label, change) => editSong(song, label, change) : undefined}
+        edit={song ? (label, change) => editInScope(song, label, change) : undefined}
+        scope={
+          song && setlist
+            ? {
+                setlistName: setlist.name,
+                value: sectionScope,
+                set: setSectionScope,
+                edited: !!setlist.sections?.[song.id],
+                applyEverywhere: () => editSong(song, 'Use These Sections in Every Setlist', () => setSectionsEverywhere(song)),
+                revert: () =>
+                  editSong(song, 'Use the Song’s Own Sections', () => {
+                    song.sections = (song.librarySections ?? song.sections).map((s) => ({ ...s }))
+                  }),
+              }
+            : undefined
+        }
       />
       <div className="lower">
         <Mixer
@@ -892,7 +928,7 @@ export default function App() {
           engine={engine}
           song={lib.songs[settingsFor]}
           loaded={settingsFor === currentId}
-          edit={(label, change, field) => editSong(lib.songs[settingsFor], label, change, field)}
+          edit={(label, change, field) => editInScope(lib.songs[settingsFor], label, change, field)}
           pads={padChoices}
           onClose={() => setSettingsFor(null)}
         />

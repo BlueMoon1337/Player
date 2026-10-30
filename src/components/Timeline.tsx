@@ -28,6 +28,53 @@ interface Props {
   editing?: boolean
   /** Makes one undoable change to the song. */
   edit?: (label: string, change: () => void) => void
+  /** Edit mode: whether section changes go to this setlist only or to every setlist. */
+  scope?: SectionScope
+}
+
+export interface SectionScope {
+  setlistName: string
+  value: 'setlist' | 'all'
+  set: (v: 'setlist' | 'all') => void
+  /** This setlist has its own edit of the song's sections. */
+  edited: boolean
+  /** Makes this setlist's sections the song's own, in every setlist. */
+  applyEverywhere: () => void
+  /** Drops this setlist's edit: back to the song's own sections. */
+  revert: () => void
+}
+
+/** Above the song map: where section changes go, and this setlist's edit of them. */
+function ScopeBar({ scope }: { scope: SectionScope }) {
+  return (
+    <div className="smap-scope">
+      <span className="smap-scope-label">Section changes apply to</span>
+      <div className="smap-scope-seg" role="radiogroup" aria-label="Section changes apply to">
+        {(
+          [
+            ['setlist', `“${scope.setlistName}” only`],
+            ['all', 'Every setlist'],
+          ] as const
+        ).map(([v, label]) => (
+          <button key={v} role="radio" aria-checked={scope.value === v} className={scope.value === v ? 'on' : ''} onClick={() => scope.set(v)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <span className="dialog-actions-spacer" />
+      {scope.edited && (
+        <>
+          <span className="smap-scope-note">Edited for “{scope.setlistName}”</span>
+          <button className="smap-scope-act" onClick={scope.applyEverywhere} title="Make these sections the song’s own, in every setlist">
+            Use in Every Setlist
+          </button>
+          <button className="smap-scope-act" onClick={scope.revert} title="Go back to the song’s own sections in this setlist">
+            Revert
+          </button>
+        </>
+      )}
+    </div>
+  )
 }
 
 /** A section narrower than this shows a ••• menu instead of its − and + buttons (as Playback does). */
@@ -45,7 +92,7 @@ const PLAYHEAD_LEAD = 0.12
 /** After scrolling by hand, the view waits this long before following the playhead again. */
 const HAND_SCROLL_MS = 3000
 
-export function Timeline({ engine, state, song, peaks, jumpMode, version, editing = false, edit }: Props) {
+export function Timeline({ engine, state, song, peaks, jumpMode, version, editing = false, edit, scope }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const wrap = useRef<HTMLDivElement>(null)
   const playhead = useRef<HTMLDivElement>(null)
@@ -183,7 +230,8 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
 
   if (editing && edit) {
     return (
-      <div className="timeline song-map">
+      <div className={`timeline song-map ${scope ? 'scoped' : ''}`}>
+        {scope && <ScopeBar scope={scope} />}
         <button className="smap-btn smap-add-start" title="Add a section at the playhead" onClick={(e) => showAt(e, addAtPlayhead(song, engine, edit))}>
           <PlusIcon />
         </button>
