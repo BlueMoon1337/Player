@@ -138,8 +138,16 @@ export function sectionIndexAt(song: Song, time: number): number {
   return idx
 }
 
+/** A section named after its key, as KeyFinder marks key changes: "D minor", "F# major". */
+const KEY_SECTION = /^([A-G])([#b♯♭]?)\s+(major|minor)$/i
+
+/** One colour per key, so each key change in a song stands out. */
+const KEY_COLORS = ['#dc2626', '#ea580c', '#d97706', '#ca8a04', '#65a30d', '#16a34a', '#0d9488', '#0891b2', '#2563eb', '#4f46e5', '#7c3aed', '#c026d3']
+
 /** Section colours, after Playback's song map. */
 export function sectionColor(name: string): string {
+  const key = KEY_SECTION.exec(name.trim())
+  if (key) return KEY_COLORS[KEYS.indexOf(keyRoot(key[1].toUpperCase() + key[2].replace('♯', '#').replace('♭', 'b')))]
   const n = name.toLowerCase()
   if (n.startsWith('count')) return '#71717a'
   if (n.startsWith('intro')) return '#0d9488'
@@ -191,6 +199,9 @@ export function sectionAbbrev(name: string): string {
     [/^tag$/i, 'Tg'],
   ]
   for (const [re, abbrev] of special) if (re.test(n)) return abbrev
+  // A key change: "D minor" → Dm, "F# major" → F#.
+  const key = KEY_SECTION.exec(n)
+  if (key) return key[1].toUpperCase() + key[2] + (/^minor$/i.test(key[3]) ? 'm' : '')
   const num = /^(\S)\S*.*?\s*(\d+)$/.exec(n)
   if (num) return (num[1].toUpperCase() + num[2]).slice(0, 3)
   const parts = n.split('-').filter(Boolean)

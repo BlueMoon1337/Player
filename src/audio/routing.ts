@@ -182,10 +182,23 @@ Woodwinds: aux
 Wurli: keys
 `
 
-/** Every named track with its default bus, in alphabetical order. */
+/**
+ * KeyFinder's "Stems for Player" (github.com/BlueMoon1337/key-finder), where Playback doesn't name
+ * them: Demucs' guitar and "other", the 2-stem split's accompaniment, the original mix kept for
+ * reference (on the Click bus, as Playback's reference), and the song when it wasn't split.
+ */
+const KEYFINDER_TRACKS = `
+Guitar: eg
+Other: aux
+Backing: aux
+Reference: click
+Song: aux
+`
+
+/** Every named track with its default bus. */
 export const TRACK_DEFAULTS: { name: string; bus: BusId }[] = (() => {
   const out: { name: string; bus: BusId }[] = []
-  for (const line of DEFAULT_TRACKS.trim().split('\n')) {
+  for (const line of (DEFAULT_TRACKS + KEYFINDER_TRACKS).split('\n').filter((l) => l.trim())) {
     const [, names, bus] = /^(.*):\s*(\w+)$/.exec(line)!
     // "Name, 1-3": the name and its numbered ones; "Name 1-3": only the numbered ones.
     const m = /^(.*?)(,)?\s+(\d+)-(\d+)$/.exec(names)

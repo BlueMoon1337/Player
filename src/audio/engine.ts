@@ -75,7 +75,7 @@ export interface EngineState {
   autoPan: boolean
   /** Settings ▸ MIDI Out. */
   midiOut: boolean
-  /** The loaded song's buses (with their stems), in Playback's bus order. */
+  /** The loaded song's buses (with their stems), in Playback's bus order; the Click bus is the click channel. */
   groups: { id: BusId; settings: GroupSettings; members: string[]; output: Bus }[]
   masterVolume: number
   /** Channels on the current output device (2 for plain stereo). */
@@ -312,7 +312,7 @@ export class Engine {
     this.groups.clear()
     const mix = loadMix()
     for (const ch of this.channels.values()) {
-      if (!ch.busGroup || this.groups.has(ch.busGroup)) continue
+      if (!ch.busGroup || ch.busGroup === 'click' || this.groups.has(ch.busGroup)) continue
       const g = mix[this.groupKey(ch.busGroup)] ?? {}
       this.groups.set(ch.busGroup, { volume: g.volume ?? 0.75, mute: g.mute ?? false, solo: false })
     }
@@ -485,13 +485,15 @@ export class Engine {
       settings: {
         ...DEFAULT_SETTINGS,
         volume: fromSong ? this.defaultVolume : DEFAULT_SETTINGS.volume,
+        // A song's original mix (a KeyFinder export's Reference) would double the stems: it starts muted.
+        mute: group === 'stem' && isReferenceName(name),
         ...saved,
         solo: false,
       },
       fromSong,
       busGroup: group === 'stem' ? trackBus(name, this.trackBuses) : null,
     }
-    if (ch.busGroup && !this.groups.has(ch.busGroup)) {
+    if (ch.busGroup && ch.busGroup !== 'click' && !this.groups.has(ch.busGroup)) {
       const g = loadMix()[this.groupKey(ch.busGroup)] ?? {}
       this.groups.set(ch.busGroup, { volume: g.volume ?? 0.75, mute: g.mute ?? false, solo: false })
     }
@@ -507,8 +509,11 @@ export class Engine {
    */
   private applyGains() {
     const all = [...this.channels.values()]
-    const grp = (c: Channel) => (c.busGroup ? this.groups.get(c.busGroup) : undefined)
-    const stemSolo = all.some((c) => c.group === 'stem' && (c.settings.solo || grp(c)?.solo))
+    // A track on the Click bus (a reference, say) is mixed by the Click strip, like the click itself.
+    const onClickBus = (c: Channel) => c.group === 'stem' && c.busGroup === 'click'
+    const grp = (c: Channel): GroupSettings | undefined =>
+      onClickBus(c) ? this.clickBus?.settings : c.busGroup ? this.groups.get(c.busGroup) : undefined
+    const stemSolo = all.some((c) => c.group === 'stem' && (c.settings.solo || (!onClickBus(c) && grp(c)?.solo)))
     const clickSolo = this.channels.get('click')?.settings.solo ?? false
     const partSolo = all.some((c) => c.group === 'click' && c.id !== 'click' && c.settings.solo)
     const now = this.ctx.currentTime
@@ -516,7 +521,8 @@ export class Engine {
       const s = ch.settings
       const g = grp(ch)
       let on = !s.mute && !g?.mute && !(this.hideReference && ch.group === 'stem' && isReferenceName(ch.name))
-      if (ch.group === 'stem') on &&= stemSolo ? s.solo || !!g?.solo : !clickSolo
+      if (onClickBus(ch)) on &&= !stemSolo || s.solo || clickSolo
+      else if (ch.group === 'stem') on &&= stemSolo ? s.solo || !!g?.solo : !clickSolo
       else if (ch.id !== 'click') on &&= !partSolo || s.solo
       const gain = on ? faderToGain(s.volume) * (g ? faderToGain(g.volume) : 1) : 0
       ch.gain.gain.setTargetAtTime(gain, now, 0.01)
@@ -1118,7 +1124,7 @@ export class Engine {
     const out: EngineState['groups'] = []
     for (const id of this.order) {
       const c = this.channels.get(id)!
-      if (!c.busGroup) continue
+      if (!c.busGroup || c.busGroup === 'click') continue
       let g = out.find((x) => x.id === c.busGroup)
       if (!g) out.push((g = { id: c.busGroup, settings: this.groups.get(c.busGroup)!, members: [], output: this.busRoute(c.busGroup) }))
       g.members.push(c.id)

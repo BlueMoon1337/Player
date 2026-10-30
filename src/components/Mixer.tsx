@@ -206,7 +206,10 @@ export function Mixer(p: Props) {
     const set = (patch: Partial<ChannelSettings>) => engine.setChannel(c.id, patch)
     const s = c.settings
     // A muted bus shows its tracks muted too.
-    const busMuted = !!c.busGroup && !!state.groups.find((g) => g.id === c.busGroup)?.settings.mute
+    const busMuted =
+      c.busGroup === 'click'
+        ? !!state.channels.find((x) => x.id === 'click')?.settings.mute
+        : !!c.busGroup && !!state.groups.find((g) => g.id === c.busGroup)?.settings.mute
     return (
       <Strip
         key={c.id}
@@ -350,9 +353,34 @@ export function Mixer(p: Props) {
     )
   } else if (view === 'buses') {
     const setGroup = (id: BusId, patch: Partial<GroupSettings>) => engine.setGroup(id, patch)
+    const onClickBus = stems.filter((c) => c.busGroup === 'click')
     main = (
       <div className="mixer-strips buses-view">
-        {clickBus && <div className="strip-group click-group">{channelStrip(clickBus, 'bus')}</div>}
+        {clickBus && (
+          // The Click bus: the click, and any track routed to it (a reference, say), behind its ›.
+          <div className={`strip-group click-group ${onClickBus.length && openBuses.has('click') ? 'open' : ''}`}>
+            {channelStrip(
+              clickBus,
+              'bus',
+              onClickBus.length
+                ? {
+                    expand: {
+                      open: openBuses.has('click'),
+                      label: onClickBus.length === 1 ? 'its track' : `its ${onClickBus.length} tracks`,
+                      toggle: () => {
+                        const next = new Set(openBuses)
+                        if (!next.delete('click')) next.add('click')
+                        setOpenBuses(next)
+                      },
+                    },
+                  }
+                : {},
+            )}
+            {onClickBus.length > 0 && openBuses.has('click') && (
+              <div className="strip-sub">{onClickBus.map((c) => channelStrip(c, 'sub'))}</div>
+            )}
+          </div>
+        )}
         {state.groups.length ? (
           <div className="strip-group stem-group">
             {state.groups.map((g) => {
