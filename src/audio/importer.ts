@@ -140,10 +140,16 @@ export async function importStems(
   const metaTitle = metas.find((m) => m.title)?.title ?? null
   const metaArtist = metas.find((m) => m.artist)?.artist ?? undefined
   const metaAlbum = metas.find((m) => m.album)?.album ?? undefined
+  // KeyFinder (github.com/BlueMoon1337/key-finder) names its exports like MultiTracks downloads
+  // but with the artist where MultiTracks put the album, and says so in its WAVs (ISFT).
+  const fromKeyFinder = metas.some((m) => m.software === 'KeyFinder')
 
   // What's known from outside the audio wins: a MultiTracks name (title, album, key, BPM),
   // then its Ableton set (sections, time signature), then what the WAV files carry.
   const name = opts.meta?.name
+  const nameArtist = fromKeyFinder && name?.album && name.album !== 'KeyFinder' ? name.album : undefined
+  const artist = metaArtist ?? nameArtist
+  const album = fromKeyFinder ? metaAlbum : (name?.album ?? metaAlbum)
   const set = opts.meta?.ableton
   const setMarkers = set?.markers.length ? set : null
   const finalBpm = name?.bpm ?? set?.bpm ?? bpm ?? 120
@@ -151,7 +157,9 @@ export async function importStems(
   const clickStem = stems.find((s) => isClickStem(s.name))
 
   const notes: string[] = []
-  if (name?.album) notes.push(`title, album, key and tempo from the name`)
+  if (name?.album) {
+    notes.push(fromKeyFinder ? `title, ${artist ? 'artist, ' : ''}key and tempo from KeyFinder` : `title, album, key and tempo from the name`)
+  }
   // Counted as they'll appear: a marker past the end of the audio is dropped.
   const within = (m: { markers: { time: number }[] }) => m.markers.filter((x) => x.time < duration).length
   if (setMarkers) notes.push(`${within(setMarkers)} sections from the Ableton set`)
@@ -164,7 +172,9 @@ export async function importStems(
     warnings.push(
       set
         ? 'No sections found: its Ableton set has no locators or clips named like sections. Add them in the song map (EDIT).'
-        : 'No sections found: there’s no Ableton set (.als) in it. Add them in the song map (EDIT).',
+        : fromKeyFinder
+          ? 'No sections found: KeyFinder marks only key changes, and this song stays in one key. Add them in the song map (EDIT).'
+          : 'No sections found: there’s no Ableton set (.als) in it. Add them in the song map (EDIT).',
     )
   }
 
@@ -177,8 +187,8 @@ export async function importStems(
   const song: Song = {
     id: opts.songId ?? uid('song'),
     title,
-    artist: metaArtist,
-    album: name?.album ?? metaAlbum,
+    artist,
+    album,
     added: Date.now(),
     key: name?.key ?? 'C',
     bpm: finalBpm,
