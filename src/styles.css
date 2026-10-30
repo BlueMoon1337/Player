@@ -1544,7 +1544,7 @@ button.link {
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 .sl-row.lib {
-  grid-template-columns: 34px minmax(0, 1fr) 40px 70px 52px auto 26px;
+  grid-template-columns: 34px minmax(0, 1fr) 40px 70px 52px 66px auto 26px;
 }
 .sl-row[draggable='true'] {
   cursor: grab;

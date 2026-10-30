@@ -168,6 +168,8 @@ export interface DesktopAPI {
     deleteSong(songId: string): Promise<void>
     restoreSong(songId: string): Promise<SongRecord>
     saveState(state: LibraryState): Promise<void>
+    /** Each song's size on disk (its folder: stems and cover), by song id. */
+    sizes(): Promise<Record<string, number>>
     /** Opens the library folder, or a song's folder, in the file manager. */
     reveal(songId?: string): Promise<void>
   }

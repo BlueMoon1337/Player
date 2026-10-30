@@ -206,6 +206,27 @@ export class Library {
     await fs.rename(this.songDir(id), dest)
   }
 
+  /** Each song folder's size: everything in it, stems and cover. */
+  async sizes(): Promise<Record<string, number>> {
+    const out: Record<string, number> = {}
+    let entries: import('node:fs').Dirent[] = []
+    try {
+      entries = await fs.readdir(this.songsDir, { withFileTypes: true })
+    } catch {
+      return out
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !ID_RE.test(entry.name)) continue
+      const dir = path.join(this.songsDir, entry.name)
+      let total = 0
+      for (const f of await fs.readdir(dir, { withFileTypes: true, recursive: true }).catch(() => [])) {
+        if (f.isFile()) total += (await fs.stat(path.join(f.parentPath, f.name)).catch(() => null))?.size ?? 0
+      }
+      out[entry.name] = total
+    }
+    return out
+  }
+
   /** Brings back a song deleted this session (Undo). */
   async restoreSong(id: string): Promise<SongRecord> {
     assertId(id)

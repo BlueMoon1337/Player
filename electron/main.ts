@@ -468,6 +468,7 @@ function registerIpc() {
   })
   handle('library:restore', (id: unknown) => library.restoreSong(id as string))
   handle('library:save-state', (state: LibraryState) => library.saveState(state))
+  handle('library:sizes', () => library.sizes())
 
   handle('updates:info', () => ({ version: app.getVersion(), hasToken: updates.hasToken(), blocker: updates.blocker() }))
   handle('updates:set-token', (token: unknown) => updates.setToken(token))

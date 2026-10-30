@@ -19,6 +19,7 @@ const api: DesktopAPI = {
     deleteSong: (songId) => ipcRenderer.invoke('library:delete', songId),
     restoreSong: (songId) => ipcRenderer.invoke('library:restore', songId),
     saveState: (state) => ipcRenderer.invoke('library:save-state', state),
+    sizes: () => ipcRenderer.invoke('library:sizes'),
     reveal: (songId) => ipcRenderer.invoke('library:reveal', songId),
   },
   cues: {

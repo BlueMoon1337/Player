@@ -90,6 +90,17 @@ const SORTS: Record<LibrarySort, (a: Song, b: Song) => number> = {
     byTitle(a, b),
 }
 
+/** "412 MB", "1.2 GB": a song's size, in the units Finder and Explorer use. */
+function formatBytes(n: number): string {
+  const units = ['bytes', 'KB', 'MB', 'GB']
+  let i = 0
+  while (n >= 1000 && i < units.length - 1) {
+    n /= 1000
+    i++
+  }
+  return `${i && n < 10 ? n.toFixed(1) : Math.round(n)} ${units[i]}`
+}
+
 const listText = (items: string[]) =>
   items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 
@@ -105,6 +116,21 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
   /** The setlist at the side a song is being dragged over. */
   const [dropOn, setDropOn] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  /** Desktop: each library song's size on disk, read again as songs come and go. */
+  const [sizes, setSizes] = useState<Record<string, number>>({})
+  const songCount = Object.keys(lib.songs).length
+  useEffect(() => {
+    if (!desktop || view !== 'library') return
+    let live = true
+    desktop.library
+      .sizes()
+      .then((s) => live && setSizes(s))
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [view, songCount])
+  const sizeOf = (song: Song) => (song.source === 'library' ? sizes[song.id] : song.bytes)
 
   const [sort, setSortState] = useState<LibrarySort>(loadSort)
   const setSort = (s: LibrarySort) => {
@@ -387,6 +413,11 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
                   <span className="sl-key">{song.key}</span>
                   <span className="sl-meta">{Math.round(song.bpm)} BPM</span>
                   <span className="sl-meta">{formatTime(song.duration)}</span>
+                  {view === 'library' && (
+                    <span className="sl-meta sl-size" title={song.source === 'demo' ? 'Made by Player as it plays: no files' : 'Size of its files'}>
+                      {sizeOf(song) !== undefined ? formatBytes(sizeOf(song)!) : '—'}
+                    </span>
+                  )}
                   {view === 'library' ? (
                     <button
                       className={`small sl-action ${inSetlist ? 'in' : ''}`}

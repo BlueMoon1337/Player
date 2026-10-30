@@ -61,6 +61,8 @@ export interface ImportResult {
 
 interface Decoded {
   source: StemSource
+  /** Size of the file, when it was handed over as bytes (not a URL). */
+  bytes: number | null
   buffer: AudioBuffer
   meta: WavMeta | null
 }
@@ -103,8 +105,9 @@ export async function importStems(
   const results = await mapLimit(audio, DECODERS, async (src) => {
     try {
       const input = typeof src.input === 'function' ? await src.input() : src.input
+      const bytes = typeof input === 'string' ? null : input instanceof Blob ? input.size : input.byteLength
       const { buffer, meta } = await decodeAudio(ctx, input)
-      return { source: src, buffer, meta } as Decoded
+      return { source: src, bytes, buffer, meta } as Decoded
     } catch (e) {
       skipped.push({ name: src.name, reason: (e as Error).message })
       if (src.file) skippedFiles.push(src.file)
@@ -205,5 +208,6 @@ export async function importStems(
     artwork: opts.meta?.artwork ?? songArtwork(title),
     source: opts.source ?? 'user',
   }
+  if (decoded.every((d) => d.bytes !== null)) song.bytes = decoded.reduce((t, d) => t + d.bytes!, 0)
   return { song, skipped, skippedFiles, notes, warnings }
 }

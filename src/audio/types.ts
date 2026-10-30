@@ -34,6 +34,8 @@ export interface Song {
   sections: Section[]
   /** The song's own sections (from import; saved with the song), before any setlist's edits. */
   librarySections?: Section[]
+  /** Bytes of the files it was imported from (browser imports; a library song's are on disk). */
+  bytes?: number
   /** The pad sound for this song (Song Settings); otherwise the Default Ambient Pad. */
   pad?: string
   /** Audio stems. Empty until the song is loaded (demo and library songs load lazily). */
