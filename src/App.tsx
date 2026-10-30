@@ -12,7 +12,7 @@ import { SettingsDialog, type SettingsTab } from './components/SettingsDialog'
 import { Setlist } from './components/Setlist'
 import { LibraryPicker } from './components/LibraryPicker'
 import { SetlistsMenu } from './components/SetlistsMenu'
-import { Timeline } from './components/Timeline'
+import { type SectionScope, Timeline } from './components/Timeline'
 import { Transport } from './components/Transport'
 import { UpdateDialog } from './components/UpdateDialog'
 import { clearNote, redo, undo, useHistory } from './library/history'
@@ -26,6 +26,7 @@ import {
   onSaveError,
   removeFromSetlist,
   setlistSongs,
+  getLibrary,
   setSectionsEverywhere,
   setSetlistSections,
   setSongEnd,
@@ -118,6 +119,7 @@ export default function App() {
   // Edit mode: Playback's "Setlist / Song Map".
   const [editing, setEditingState] = useState(false)
   const [settingsFor, setSettingsFor] = useState<string | null>(null)
+  const [songSettingsTab, setSongSettingsTab] = useState<'song' | 'sections'>('song')
   /** The Library popover, opened from a + in the setlist: adding at this position. */
   const [addAt, setAddAt] = useState<{ index: number; anchor: DOMRect } | null>(null)
   const [setlistOpen, setSetlistOpen] = useState(true)
@@ -158,7 +160,10 @@ export default function App() {
     setEditingState(on)
     if (!on) setSectionScope('setlist')
   }
-  /** An undoable edit to a song; with every setlist chosen, a change to its sections goes to all of them. */
+  /**
+   * An undoable edit to a song. A change to its sections goes to every setlist when that's chosen,
+   * or when the song isn't in the current setlist (there's no setlist to keep it with).
+   */
   const editInScope = (target: Song, label: string, change: () => void, field?: string) =>
     editSong(
       target,
@@ -166,10 +171,38 @@ export default function App() {
       () => {
         const before = JSON.stringify(target.sections)
         change()
-        if (sectionScope === 'all' && JSON.stringify(target.sections) !== before) setSectionsEverywhere(target)
+        const everywhere = sectionScope === 'all' || !currentSetlist().songs.includes(target.id)
+        if (everywhere && JSON.stringify(target.sections) !== before) setSectionsEverywhere(target)
       },
       field,
     )
+
+  /** Where a song's section changes go, for the song map and Song Settings ▸ Sections. */
+  const scopeFor = (target: Song, openList?: () => void): SectionScope | undefined => {
+    const sl = lib.ready ? currentSetlist(lib) : null
+    if (!sl) return undefined
+    return {
+      setlistName: sl.name,
+      inSetlist: sl.songs.includes(target.id),
+      value: sectionScope,
+      set: setSectionScope,
+      edited: !!sl.sections?.[target.id],
+      applyEverywhere: () => editSong(target, 'Use These Sections in Every Setlist', () => setSectionsEverywhere(target)),
+      revert: () =>
+        editSong(target, 'Use the Song’s Own Sections', () => {
+          target.sections = (target.librarySections ?? target.sections).map((s) => ({ ...s }))
+        }),
+      openList,
+    }
+  }
+
+  /** Song Settings for a song, showing its sections as they are in the current setlist. */
+  const openSongSettings = (id: string, tab: 'song' | 'sections' = 'song') => {
+    const target = getLibrary().songs[id]
+    if (target && currentSetlist().songs.includes(id) && arrange(target)) setVersion((v) => v + 1)
+    setSongSettingsTab(tab)
+    setSettingsFor(id)
+  }
 
   useEffect(() => {
     try {
@@ -726,7 +759,7 @@ export default function App() {
     else if (cmd === 'setlists') setSetlistsOpen(true)
     else if (cmd === 'toggle-edit') setEditing(!editing)
     else if (cmd === 'song-settings') {
-      if (currentId) setSettingsFor(currentId)
+      if (currentId) openSongSettings(currentId)
     }
     else if (cmd === 'outputs') setSettingsTab('buses')
     else if (cmd === 'pad') setLowerView('pad')
@@ -777,9 +810,9 @@ export default function App() {
   useEffect(
     () =>
       onSongChanged((changed, kind) => {
-        // Section edits belong to the setlist they're made in (the loaded song's); the song's own
+        // Section edits belong to the setlist they're made in (the current one); the song's own
         // sections, saved with it, stay as they were.
-        if (engine.currentSong === changed && changed.librarySections) {
+        if (changed.librarySections && currentSetlist().songs.includes(changed.id)) {
           const own = JSON.stringify(changed.sections) === JSON.stringify(changed.librarySections)
           setSetlistSections(currentSetlist().id, changed.id, own ? null : changed.sections)
         }
@@ -816,7 +849,7 @@ export default function App() {
         onBack={() => engine.seek(0)}
         editing={editing}
         onEdit={() => setEditing(!editing)}
-        onSongSettings={() => currentId && setSettingsFor(currentId)}
+        onSongSettings={() => currentId && openSongSettings(currentId)}
         setlistsOpen={setlistsOpen}
         onSetlists={() => setSetlistsOpen((v) => !v)}
         onMore={() => setSettingsTab('general')}
@@ -831,7 +864,7 @@ export default function App() {
           songEnd={(id) => songEnd(setlist ?? undefined, id)}
           onSongEnd={(id, end) => setlist && setSongEnd(setlist.id, id, end)}
           onAddSong={(index, anchor) => setAddAt({ index: index ?? songs.length, anchor })}
-          onSongSettings={setSettingsFor}
+          onSongSettings={(id) => openSongSettings(id)}
           onSelect={(id) => void selectSong(id)}
           onImport={importFiles}
           onImportClick={desktop ? () => openImport() : undefined}
@@ -850,21 +883,7 @@ export default function App() {
         version={version}
         editing={editing}
         edit={song ? (label, change) => editInScope(song, label, change) : undefined}
-        scope={
-          song && setlist
-            ? {
-                setlistName: setlist.name,
-                value: sectionScope,
-                set: setSectionScope,
-                edited: !!setlist.sections?.[song.id],
-                applyEverywhere: () => editSong(song, 'Use These Sections in Every Setlist', () => setSectionsEverywhere(song)),
-                revert: () =>
-                  editSong(song, 'Use the Song’s Own Sections', () => {
-                    song.sections = (song.librarySections ?? song.sections).map((s) => ({ ...s }))
-                  }),
-              }
-            : undefined
-        }
+        scope={song ? scopeFor(song, () => openSongSettings(song.id, 'sections')) : undefined}
       />
       <div className="lower">
         <Mixer
@@ -929,6 +948,8 @@ export default function App() {
           song={lib.songs[settingsFor]}
           loaded={settingsFor === currentId}
           edit={(label, change, field) => editInScope(lib.songs[settingsFor], label, change, field)}
+          scope={scopeFor(lib.songs[settingsFor])}
+          tab={songSettingsTab}
           pads={padChoices}
           onClose={() => setSettingsFor(null)}
         />

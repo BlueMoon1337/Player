@@ -34,6 +34,8 @@ interface Props {
 
 export interface SectionScope {
   setlistName: string
+  /** The song is in the current setlist; if not, section changes are always the song's own. */
+  inSetlist: boolean
   value: 'setlist' | 'all'
   set: (v: 'setlist' | 'all') => void
   /** This setlist has its own edit of the song's sections. */
@@ -42,10 +44,19 @@ export interface SectionScope {
   applyEverywhere: () => void
   /** Drops this setlist's edit: back to the song's own sections. */
   revert: () => void
+  /** Opens the sections as a list (Song Settings ▸ Sections). */
+  openList?: () => void
 }
 
-/** Above the song map: where section changes go, and this setlist's edit of them. */
-function ScopeBar({ scope }: { scope: SectionScope }) {
+/** Above the song map and the section list: where section changes go, and this setlist's edit of them. */
+export function ScopeBar({ scope }: { scope: SectionScope }) {
+  if (!scope.inSetlist) {
+    return (
+      <div className="smap-scope">
+        <span className="smap-scope-label">Not in “{scope.setlistName}”: section changes apply to this song in every setlist</span>
+      </div>
+    )
+  }
   return (
     <div className="smap-scope">
       <span className="smap-scope-label">Section changes apply to</span>
@@ -72,6 +83,11 @@ function ScopeBar({ scope }: { scope: SectionScope }) {
             Revert
           </button>
         </>
+      )}
+      {scope.openList && (
+        <button className="smap-scope-act" onClick={scope.openList} title="The sections as a list, with their start times">
+          Section List…
+        </button>
       )}
     </div>
   )

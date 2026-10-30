@@ -553,35 +553,6 @@ button.small {
   padding: 5px 10px;
   font-size: 12px;
 }
-.section-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
-}
-.section-row {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  border-left: 4px solid var(--c);
-  padding-left: 8px;
-}
-.section-row input:first-child {
-  width: 160px;
-}
-.section-row input[type='number'] {
-  width: 90px;
-}
-.section-time {
-  width: 40px;
-  font-size: 12px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-.section-row button {
-  padding: 2px 8px;
-}
 
 /* ---------------------------------------------------------------------- mixer */
 /* Playback's lower part: strips with S, a meter and a big fader cap; side buttons; the master. */
@@ -1194,9 +1165,6 @@ button.small {
   }
   .panel .row label {
     flex: 1 1 40%;
-  }
-  .section-row input:first-child {
-    width: 110px;
   }
   .key-grid {
     grid-template-columns: repeat(6, 1fr);
@@ -2229,16 +2197,98 @@ button.smap-btn:hover {
 
 .dialog.song-settings {
   width: 820px;
+  max-height: calc(100vh - 32px);
+}
+/* Song Settings' tabs: Song (its details) and Sections (MultiTracks' section editor). */
+.song-tabs {
+  display: flex;
+  gap: 22px;
+  border-bottom: 1px solid var(--line);
+}
+.song-tabs button {
+  padding: 6px 2px 8px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 15px;
+}
+.song-tabs button.on {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+}
+.song-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.song-sections .smap-scope {
+  flex-wrap: wrap;
+  padding: 0;
+  white-space: normal;
+}
+.sec-list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(56vh, 520px);
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+}
+.sec-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 6px 8px 10px;
+  border-bottom: 1px solid var(--line);
+  box-shadow: inset 4px 0 0 var(--c);
+}
+.sec-name {
+  width: 220px;
+  padding: 6px 8px;
+  font-size: 14px;
+}
+.sec-start {
+  width: 120px;
+  padding: 6px 8px;
+  background: #23252c;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.sec-start:disabled {
+  color: var(--muted);
+}
+.sec-start.bad {
+  border-color: var(--mute);
+}
+.sec-jump {
+  padding: 3px 9px;
+  font-size: 11px;
+}
+.sec-del {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1.5px solid #8a8f99;
+  border-radius: 50%;
+  background: transparent;
+  font-size: 12px;
+}
+.sec-actions {
+  display: flex;
+  gap: 8px;
 }
 .dialog.song-settings .panel {
   max-height: none;
   padding: 0;
   border: none;
   background: transparent;
-}
-.section-hint {
-  align-self: center;
-  max-width: 260px;
 }
 
 /* ------------------------------------------------- library popover (+ in the setlist) */

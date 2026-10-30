@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Engine } from '../audio/engine'
-import { KEYS, type Song, formatTime, sectionColor, uid } from '../audio/types'
+import { KEYS, type Song } from '../audio/types'
+import { SongSections } from './SongSections'
+import type { SectionScope } from './Timeline'
 
 /** The audio output devices, kept up to date as they come and go. */
 export function useAudioDevices() {
@@ -29,24 +31,6 @@ interface EditProps {
   /** Makes one undoable edit; `field` joins a burst of typing into one step. */
   edit: (label: string, change: () => void, field?: string) => void
 }
-
-const SECTION_NAMES = [
-  'Count-in',
-  'Intro',
-  'Verse 1',
-  'Verse 2',
-  'Verse 3',
-  'Pre-chorus',
-  'Chorus 1',
-  'Chorus 2',
-  'Chorus 3',
-  'Bridge',
-  'Instrumental',
-  'Turnaround',
-  'Tag',
-  'Outro',
-  'Ending',
-]
 
 /**
  * A number box you can type into freely: it shows what's typed, applies each value that's in
@@ -89,14 +73,7 @@ export interface PadChoices {
   defaultName: string
 }
 
-export function EditPanel({
-  engine,
-  song,
-  edit,
-  sectionsEditable = true,
-  pads,
-}: EditProps & { sectionsEditable?: boolean; pads?: PadChoices }) {
-  const sortSections = () => song.sections.sort((a, b) => a.start - b.start)
+export function EditPanel({ song, edit, pads }: Omit<EditProps, 'engine'> & { pads?: PadChoices }) {
   return (
     <div className="panel edit-panel">
       <div className="panel-head">
@@ -203,82 +180,7 @@ export function EditPanel({
             </label>
           )}
         </div>
-        {sectionsEditable && (
-          <button
-            className="small"
-            onClick={() => {
-              const at = engine.position
-              if (song.sections.some((s) => Math.abs(s.start - at) < 0.05)) return
-              edit('Add Section', () => {
-                song.sections.push({ id: uid('sec'), name: 'Verse 1', start: at })
-                sortSections()
-              })
-            }}
-          >
-            + Section at playhead
-          </button>
-        )}
       </div>
-      {!sectionsEditable ? (
-        <p className="hint section-hint">Load this song to change its sections here or in the song map.</p>
-      ) : (
-        <div className="section-list">
-          {song.sections.map((s, i) => (
-            <div key={s.id} className="section-row" style={{ ['--c' as string]: sectionColor(s.name) }}>
-              <input
-                list="section-names"
-                value={s.name}
-                onChange={(e) => edit('Rename Section', () => (s.name = e.target.value), `section-name:${s.id}`)}
-              />
-              <input
-                type="number"
-                step={0.01}
-                min={0}
-                value={Math.round(s.start * 1000) / 1000}
-                disabled={i === 0}
-                onChange={(e) =>
-                  edit(
-                    'Move Section',
-                    () => (s.start = Math.max(0, Math.min(song.duration - 0.1, Number(e.target.value)))),
-                    `section-start:${s.id}`,
-                  )
-                }
-                onBlur={() => edit('Move Section', sortSections, `section-start:${s.id}`)}
-              />
-              <span className="section-time">{formatTime(s.start)}</span>
-              <button
-                title="Move section start to playhead"
-                disabled={i === 0}
-                onClick={() =>
-                  edit('Move Section', () => {
-                    s.start = engine.position
-                    sortSections()
-                  })
-                }
-              >
-                ⇥
-              </button>
-              <button
-                title="Delete section"
-                disabled={song.sections.length === 1}
-                onClick={() =>
-                  edit(`Delete Section “${s.name}”`, () => {
-                    song.sections.splice(i, 1)
-                    song.sections[0].start = 0
-                  })
-                }
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-          <datalist id="section-names">
-            {SECTION_NAMES.map((n) => (
-              <option key={n} value={n} />
-            ))}
-          </datalist>
-        </div>
-      )}
     </div>
   )
 }
@@ -290,16 +192,22 @@ export function SongSettingsDialog({
   loaded,
   edit,
   pads,
+  scope,
+  tab: initialTab = 'song',
   onClose,
 }: {
   engine: Engine
   song: Song
-  /** Sections are edited against the playhead, so only for the song that's loaded. */
+  /** The loaded song can also add a section at the playhead and play from one. */
   loaded: boolean
   edit: EditProps['edit']
   pads?: PadChoices
+  /** Where section changes go: this setlist only, or every setlist. */
+  scope?: SectionScope
+  tab?: 'song' | 'sections'
   onClose: () => void
 }) {
+  const [tab, setTab] = useState(initialTab)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !document.querySelector('.ask-backdrop')) onClose()
@@ -316,7 +224,23 @@ export function SongSettingsDialog({
             ✕
           </button>
         </div>
-        <EditPanel engine={engine} song={song} edit={edit} sectionsEditable={loaded} pads={pads} />
+        <div className="song-tabs" role="tablist">
+          {(
+            [
+              ['song', 'Song'],
+              ['sections', 'Sections'],
+            ] as const
+          ).map(([t, name]) => (
+            <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
+              {name}
+            </button>
+          ))}
+        </div>
+        {tab === 'song' ? (
+          <EditPanel song={song} edit={edit} pads={pads} />
+        ) : (
+          <SongSections engine={engine} song={song} loaded={loaded} edit={edit} scope={scope} />
+        )}
         <div className="dialog-actions">
           <span className="muted">
             Changes save as you make them, and {navigator.platform.includes('Mac') ? '⌘Z' : 'Ctrl+Z'} undoes them.
