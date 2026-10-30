@@ -1,5 +1,6 @@
 import { BUSES, type BusId, autoPanOutput, busOutput, trackBus } from './routing'
-import { type ClickSoundName, barLength, renderClick } from './synth'
+import { barBefore, nextBar } from './grid'
+import { type ClickSoundName, renderClick } from './synth'
 import { type Bus, type ChannelSettings, CLICK_CHANNELS, type Song, busTopChannel, isReferenceName, parseBus, sectionEnd } from './types'
 
 export type JumpMode = 'immediate' | 'bar' | 'section'
@@ -827,11 +828,11 @@ export class Engine {
     // in and the tracks fading up to full by the section's downbeat.
     let preroll = 0
     if (this.sectionPreroll && this.pausedPos > 0) {
-      const bar = barLength(this.song)
       const sec = this.song.sections.find((s) => Math.abs(s.start - this.pausedPos) < 0.02)
-      if (sec && sec.start - bar >= 0) {
-        this.pausedPos = sec.start - bar
-        preroll = bar
+      const from = sec ? barBefore(this.song, sec.start) : -1
+      if (sec && from >= 0) {
+        this.pausedPos = from
+        preroll = sec.start - from
       }
     }
     const when = this.ctx.currentTime + 0.04
@@ -907,9 +908,7 @@ export class Engine {
     const pos = this.position
     let landAt: number
     if (mode === 'bar') {
-      const bar = barLength(song)
-      const rel = pos - song.clickOffset
-      landAt = song.clickOffset + Math.ceil((rel + 0.02) / bar) * bar
+      landAt = nextBar(song, pos + 0.02)
     } else {
       const cur = song.sections.findIndex((_, i) => sectionEnd(song, i) > pos)
       landAt = this.loop ? this.loop.end : sectionEnd(song, Math.max(0, cur))

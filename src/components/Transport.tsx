@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Engine, EngineState } from '../audio/engine'
+import { bpmAt, timeSigAt } from '../audio/grid'
 import { type Song, formatTime } from '../audio/types'
 
 interface Props {
@@ -52,6 +53,40 @@ function TimeDisplay({ engine, song }: { engine: Engine; song: Song | null }) {
       </span>
       <span className="t-time-small">{song ? `${formatTime(0)} / ${formatTime(song.duration)}` : '–:–– / –:––'}</span>
     </div>
+  )
+}
+
+/** The tempo and time signature where the song is now, as they change through it. */
+function TempoNow({ engine, song }: { engine: Engine; song: Song }) {
+  const bpm = useRef<HTMLSpanElement>(null)
+  const sig = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    let raf = 0
+    let last = ''
+    const loop = () => {
+      const t = engine.position
+      const b = Math.round(bpmAt(song, t) * 10) / 10
+      const ts = timeSigAt(song, t)
+      const text = `${b} ${ts.join('/')}`
+      if (text !== last && bpm.current && sig.current) {
+        last = text
+        bpm.current.textContent = String(b)
+        sig.current.textContent = ts.join('/')
+      }
+      raf = requestAnimationFrame(loop)
+    }
+    raf = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(raf)
+  }, [engine, song])
+  return (
+    <>
+      <span className="t-tempo-bpm" ref={bpm}>
+        {Math.round(song.bpm * 10) / 10}
+      </span>
+      <span className="t-tempo-sig" ref={sig}>
+        {song.timeSig[0]}/{song.timeSig[1]}
+      </span>
+    </>
   )
 }
 
@@ -138,14 +173,7 @@ export function Transport(p: Props) {
       </div>
       <div className="t-row">
         <div className="t-tile t-tempo" aria-label="Tempo and time signature">
-          {song ? (
-            <>
-              <span className="t-tempo-bpm">{Math.round(song.bpm * 10) / 10}</span>
-              <span className="t-tempo-sig">
-                {song.timeSig[0]}/{song.timeSig[1]}
-              </span>
-            </>
-          ) : null}
+          {song ? <TempoNow engine={engine} song={song} /> : null}
         </div>
         <TimeDisplay engine={engine} song={song} />
         <button className={`t-tile t-btn t-pad ${p.padOn ? 'on' : ''}`} onClick={p.onPad} title="Ambient pad on / off">

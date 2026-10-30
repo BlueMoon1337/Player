@@ -5,8 +5,19 @@
  * WAVE_FORMAT_EXTENSIBLE files, at the file's native sample rate. Also reads the
  * metadata DAWs embed in exported stems: cue markers with labels (cue + LIST/adtl),
  * tempo and meter (acid), and the title, artist, album and the program that wrote the file
- * (LIST/INFO INAM, IART, IPRD, ISFT).
+ * (LIST/INFO INAM, IART, IPRD, ISFT). KeyFinder also writes a "bmap" chunk: the song's beat map
+ * (where bar 1 falls, its tempo changes and time signature changes) as JSON:
+ *   {"version": 1, "offset": 0.52, "tempos": [[0, 156.0], [95.3, 150.2]], "meters": [[0, 4, 4], [61.0, 2, 4]]}
+ * with times in seconds.
  */
+
+/** A song's beats as KeyFinder found them (its "bmap" chunk). */
+export interface BeatMap {
+  /** Seconds to bar 1, beat 1. */
+  offset: number
+  tempos: { start: number; bpm: number }[]
+  meters: { start: number; timeSig: [number, number] }[]
+}
 
 export interface WavMarker {
   time: number
@@ -22,6 +33,27 @@ export interface WavMeta {
   album: string | null
   /** The program that wrote the file (ISFT), e.g. "KeyFinder". */
   software: string | null
+  beatMap: BeatMap | null
+}
+
+const num = (v: unknown, lo: number, hi: number) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi
+
+/** A "bmap" chunk's JSON, or null if it isn't one this reader understands. */
+export function parseBeatMap(json: string): BeatMap | null {
+  try {
+    const m = JSON.parse(json)
+    if (m?.version !== 1 || !Array.isArray(m.tempos) || !Array.isArray(m.meters)) return null
+    const tempos = m.tempos
+      .filter((t: unknown) => Array.isArray(t) && num(t[0], 0, 1e6) && num(t[1], 10, 999))
+      .map((t: number[]) => ({ start: t[0], bpm: t[1] }))
+    const meters = m.meters
+      .filter((x: unknown) => Array.isArray(x) && num(x[0], 0, 1e6) && num(x[1], 1, 32) && [2, 4, 8, 16].includes(x[2]))
+      .map((x: number[]) => ({ start: x[0], timeSig: [x[1], x[2]] as [number, number] }))
+    if (!tempos.length) return null
+    return { offset: num(m.offset, 0, 1e6) ? m.offset : 0, tempos, meters }
+  } catch {
+    return null
+  }
 }
 
 export interface WavFile {
@@ -99,6 +131,7 @@ export function readWav(ab: ArrayBuffer): WavFile | null {
   let artist: string | null = null
   let album: string | null = null
   let software: string | null = null
+  let beatMap: BeatMap | null = null
   const text = new TextDecoder('utf-8')
   const str = (from: number, to: number) => {
     let end = from
@@ -156,6 +189,8 @@ export function readWav(ab: ArrayBuffer): WavFile | null {
         }
         o = sbody + ssize + (ssize & 1)
       }
+    } else if (cid === 'bmap' && size > 0) {
+      beatMap = parseBeatMap(text.decode(u8.subarray(body, Math.min(len, body + size))).replace(/\0+$/, ''))
     } else if (cid === 'acid' && size >= 24) {
       const tempo = dv.getFloat32(body + 20, true)
       if (tempo >= 20 && tempo <= 400) bpm = Math.round(tempo * 100) / 100
@@ -177,7 +212,7 @@ export function readWav(ab: ArrayBuffer): WavFile | null {
     .map(([cueId, frame], i) => ({ time: frame / sampleRate, label: labels.get(cueId) || `Marker ${i + 1}` }))
     .filter((m) => m.time < frames / sampleRate)
     .sort((a, b) => a.time - b.time)
-  const meta: WavMeta = { markers, bpm, timeSig, title, artist, album, software }
+  const meta: WavMeta = { markers, bpm, timeSig, title, artist, album, software, beatMap }
 
   let encoding: string
   let read: ((o: number) => number) | null = null

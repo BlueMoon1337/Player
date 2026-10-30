@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Engine, EngineState, JumpMode, LoopMode } from '../audio/engine'
-import { barLength } from '../audio/synth'
+import { beatGrid, nearestBar } from '../audio/grid'
 import {
   SECTION_TYPES,
   type Song,
@@ -387,15 +387,12 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
 /** Edit mode's look: a pale waveform over bar lines; the section blocks are drawn as elements on top. */
 /** Waveform Grid: a line on every bar, fainter ones on the beats (when they're far enough apart). */
 function drawGrid(g: CanvasRenderingContext2D, song: Song, w: number, h: number, barAlpha: number) {
-  const bar = barLength(song)
-  const beat = bar / song.timeSig[0]
-  const pxPerBeat = (beat / song.duration) * w
-  let n = Math.ceil(-song.clickOffset / beat)
-  for (let t = song.clickOffset + n * beat; t < song.duration; t += beat, n++) {
-    const isBar = ((n % song.timeSig[0]) + song.timeSig[0]) % song.timeSig[0] === 0
-    if (!isBar && pxPerBeat < 6) continue
+  for (const b of beatGrid(song)) {
+    if (b.time < 0) continue
+    const isBar = b.index === 0
+    if (!isBar && (b.length / song.duration) * w < 6) continue
     g.fillStyle = `rgba(255, 255, 255, ${isBar ? barAlpha : barAlpha / 2.5})`
-    g.fillRect(Math.round((t / song.duration) * w), 0, 1, h)
+    g.fillRect(Math.round((b.time / song.duration) * w), 0, 1, h)
   }
 }
 
@@ -419,12 +416,10 @@ const showAt = (e: React.MouseEvent<HTMLElement>, items: MenuEntry[]) => {
   showContextMenu({ clientX: r.left, clientY: r.bottom + 4, preventDefault() {} }, items)
 }
 
-/** Snaps a time to the nearest bar line of the song's click grid. */
-/** Section edits snap to the nearest bar, while the Waveform Grid is on. */
+/** Section edits snap to the nearest bar (through tempo and time changes), while the Waveform Grid is on. */
 function snapToBar(song: Song, t: number) {
   if (!getSettings().waveformGrid) return Math.max(0, t)
-  const bar = barLength(song)
-  return Math.max(0, song.clickOffset + Math.round((t - song.clickOffset) / bar) * bar)
+  return Math.max(0, nearestBar(song, t))
 }
 
 type Edit = (label: string, change: () => void) => void

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { type Engine, type EngineState, type GroupSettings, type LoopMode, faderToDb } from '../audio/engine'
+import { beatAt } from '../audio/grid'
 import { PAD_SOUNDS, type ImportedPad, type PadPlayer } from '../audio/pad'
 import { type BusId, TRACK_BUSES, busName, defaultTrackBus } from '../audio/routing'
 import { type Bus, type ChannelSettings, type Song, busLabel, busOptions, sectionIndexAt } from '../audio/types'
@@ -60,15 +61,16 @@ function clickMeter(engine: Engine, id: string): number {
   if (!getSettings().metronomeVU) return engine.meter(id)
   const song = engine.currentSong
   if (!song || !engine.isPlaying) return 0
-  const beat = 60 / song.bpm
+  // The beat playing now, through tempo and time signature changes, and where in it.
+  const b = beatAt(song, engine.position)
+  if (!b) return 0
   const per = id === 'e' ? 2 : id === 's' ? 4 : 1
-  const rel = ((engine.position - song.clickOffset) / beat) * per
+  const rel = ((engine.position - b.time) / b.length) * per
   const n = Math.floor(rel + 1e-6)
-  const since = ((rel - n) * beat) / per
-  const inBar = (((Math.floor((n + 1e-6) / per)) % song.timeSig[0]) + song.timeSig[0]) % song.timeSig[0]
-  const onBeat = n % per === 0
-  if (id === 'accent' && !(onBeat && inBar === 0)) return 0
-  if (id === 'q' && !(onBeat && inBar !== 0)) return 0
+  const since = ((rel - n) * b.length) / per
+  const onBeat = n === 0
+  if (id === 'accent' && !(onBeat && b.index === 0)) return 0
+  if (id === 'q' && !(onBeat && b.index !== 0)) return 0
   if ((id === 'e' || id === 's') && onBeat) return 0
   return Math.exp(-since * 14)
 }

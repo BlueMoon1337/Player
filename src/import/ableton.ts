@@ -14,6 +14,10 @@ export interface AbletonSong {
   markers: { time: number; label: string }[]
   /** True when the set's tempo changes during the song. */
   tempoChanges: boolean
+  /** The tempo changes in seconds (a ramp becomes a change on each beat); the first at 0. */
+  tempos: { start: number; bpm: number }[]
+  /** Time signature changes (the set's time signature automation), in seconds; empty if none. */
+  meters: { start: number; timeSig: [number, number] }[]
   /** Where the sections came from, or null when the set has none. */
   markerSource: 'locators' | 'clips' | null
 }
@@ -60,6 +64,44 @@ export function beatsToSeconds(beat: number, map: TempoPoint[]): number {
   return t + ((beat - prev.beat) * 60) / prev.bpm
 }
 
+/** The tempo map as changes from one tempo to the next, for Player's Tempo Changes. */
+function tempoSteps(map: TempoPoint[]): { start: number; bpm: number }[] {
+  const out: { start: number; bpm: number }[] = []
+  const push = (beat: number, bpm: number) => {
+    const start = Math.round(beatsToSeconds(beat, map) * 1000) / 1000
+    const value = Math.round(bpm * 100) / 100
+    const last = out[out.length - 1]
+    if (last && Math.abs(last.start - start) < 0.001) last.bpm = value
+    else if (!last || Math.abs(last.bpm - value) >= 0.005) out.push({ start, bpm: value })
+  }
+  if (!map.length) return out
+  push(0, map[0].bpm)
+  for (let i = 1; i < map.length; i++) {
+    const a = map[i - 1]
+    const b = map[i]
+    if (b.beat - a.beat < 1e-6) {
+      push(b.beat, b.bpm)
+      continue
+    }
+    if (Math.abs(b.bpm - a.bpm) < 1e-6) continue
+    // A ramp: a change on each beat, at the tempo halfway through that beat.
+    for (let beat = Math.ceil(a.beat - 1e-6); beat < b.beat - 1e-6; beat++) {
+      const mid = Math.min(b.beat, beat + 0.5)
+      push(beat, a.bpm + ((b.bpm - a.bpm) * (mid - a.beat)) / (b.beat - a.beat))
+    }
+    push(b.beat, b.bpm)
+  }
+  return out
+}
+
+/** Live's time signature code: (numerator - 1) + 99 × log2(denominator). */
+function decodeTimeSig(code: number): [number, number] | null {
+  if (!Number.isFinite(code) || code < 0) return null
+  const num = (code % 99) + 1
+  const den = 2 ** Math.floor(code / 99)
+  return num >= 1 && num <= 32 && [2, 4, 8, 16].includes(den) ? [num, den] : null
+}
+
 /** `fallbackBpm` (e.g. from the download's name) is used when the set's own tempo can't be read. */
 /** Tempo breakpoints in an automation's events; the event at the far-negative time is the start value. */
 function tempoPoints(xml: string): TempoPoint[] {
@@ -92,11 +134,25 @@ export function parseAbleton(xml: string, fallbackBpm?: number | null): AbletonS
   // Live encodes the time signature as (numerator - 1) + 99 × log2(denominator); Live 8 as an event.
   const tsBlock = /<TimeSignature>([\s\S]*?)<\/TimeSignature>/.exec(master)?.[1] ?? ''
   const tsCode = Number(valueOf(tsBlock, 'Manual') ?? /<EnumEvent[^>]*\bValue="(\d+)"/.exec(tsBlock)?.[1])
-  let timeSig: [number, number] | null = null
-  if (Number.isFinite(tsCode) && tsCode > 0) {
-    const num = (tsCode % 99) + 1
-    const den = 2 ** Math.floor(tsCode / 99)
-    if (num >= 1 && num <= 32 && [2, 4, 8, 16].includes(den)) timeSig = [num, den]
+  let timeSig = tsCode > 0 ? decodeTimeSig(tsCode) : null
+  // Time signature changes: the master track envelope on the time signature's automation target.
+  const tsTarget = /<AutomationTarget\s+Id="(\d+)"/.exec(tsBlock)?.[1]
+  const tsEnv = tsTarget
+    ? master.split('<AutomationEnvelope ').slice(1).find((e) => new RegExp(`<PointeeId\\s+Value="${tsTarget}"`).test(e))
+    : undefined
+  const meters: AbletonSong['meters'] = []
+  if (tsEnv && map.length) {
+    const events = [...tsEnv.matchAll(/<EnumEvent[^>]*\bTime="([-\d.eE+]+)"[^>]*\bValue="(\d+)"/g)]
+      .map((m) => ({ beat: Math.max(0, Number(m[1])), sig: decodeTimeSig(Number(m[2])) }))
+      .filter((e): e is { beat: number; sig: [number, number] } => !!e.sig)
+      .sort((a, b) => a.beat - b.beat)
+    for (const e of events) {
+      const start = Math.round(beatsToSeconds(e.beat, map) * 1000) / 1000
+      const last = meters[meters.length - 1]
+      if (last && Math.abs(last.start - start) < 0.001) last.timeSig = e.sig
+      else if (!last || last.timeSig.join('/') !== e.sig.join('/')) meters.push({ start, timeSig: e.sig })
+    }
+    if (meters.length) timeSig = meters[0].timeSig
   }
 
   // Locators, wherever the set keeps them (Live 8 writes them without an Id).
@@ -122,5 +178,13 @@ export function parseAbleton(xml: string, fallbackBpm?: number | null): AbletonS
     .map((m, i) => ({ time: map.length ? beatsToSeconds(m.beat, map) : 0, label: m.label || `Marker ${i + 1}` }))
 
   const usable = map.length ? markers : []
-  return { bpm, timeSig, markers: usable, tempoChanges, markerSource: usable.length ? markerSource : null }
+  return {
+    bpm,
+    timeSig,
+    markers: usable,
+    tempoChanges,
+    tempos: tempoSteps(map),
+    meters: meters.length > 1 ? meters : [],
+    markerSource: usable.length ? markerSource : null,
+  }
 }

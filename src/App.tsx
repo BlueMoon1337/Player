@@ -7,7 +7,7 @@ import { renderDemoStems } from './audio/synth'
 import { type Song, keyRoot, sectionIndexAt } from './audio/types'
 import { AskHost, ContextMenuHost, confirmDelete, isAsking } from './components/Ask'
 import { type LowerView, Mixer } from './components/Mixer'
-import { SongSettingsDialog } from './components/Panels'
+import { SongSettingsDialog, type SongTab } from './components/Panels'
 import { SettingsDialog, type SettingsTab } from './components/SettingsDialog'
 import { Setlist } from './components/Setlist'
 import { LibraryPicker } from './components/LibraryPicker'
@@ -119,7 +119,7 @@ export default function App() {
   // Edit mode: Playback's "Setlist / Song Map".
   const [editing, setEditingState] = useState(false)
   const [settingsFor, setSettingsFor] = useState<string | null>(null)
-  const [songSettingsTab, setSongSettingsTab] = useState<'song' | 'sections'>('song')
+  const [songSettingsTab, setSongSettingsTab] = useState<SongTab>('song')
   /** The Library popover, opened from a + in the setlist: adding at this position. */
   const [addAt, setAddAt] = useState<{ index: number; anchor: DOMRect } | null>(null)
   const [setlistOpen, setSetlistOpen] = useState(true)
@@ -197,7 +197,7 @@ export default function App() {
   }
 
   /** Song Settings for a song, showing its sections as they are in the current setlist. */
-  const openSongSettings = (id: string, tab: 'song' | 'sections' = 'song') => {
+  const openSongSettings = (id: string, tab: SongTab = 'song') => {
     const target = getLibrary().songs[id]
     if (target && currentSetlist().songs.includes(id) && arrange(target)) setVersion((v) => v + 1)
     setSongSettingsTab(tab)

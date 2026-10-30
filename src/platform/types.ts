@@ -25,6 +25,9 @@ export interface SongRecord {
   clickStem?: string | null
   /** The song's own pad sound; otherwise the Default Ambient Pad. */
   pad?: string
+  /** Tempo changes and time signature changes, when it has any. */
+  tempos?: { start: number; bpm: number }[]
+  meters?: { start: number; timeSig: [number, number] }[]
 }
 
 /** An imported pad, as saved in `<library>/Pads/<id>/pad.json` next to its WAVs. */

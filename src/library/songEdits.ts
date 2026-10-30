@@ -4,6 +4,7 @@
  * records the song's editable fields before and after; undo puts them back. Typing into one
  * field joins into a single step (history.ts).
  */
+import type { MeterChange, TempoChange } from '../audio/grid'
 import type { Section, Song } from '../audio/types'
 import { record } from './history'
 import { getLibrary, setSetlistSections } from './store'
@@ -18,6 +19,8 @@ interface SongSnapshot {
   clickOffset: number
   clickStem: string | null
   pad: string | undefined
+  tempos: TempoChange[] | undefined
+  meters: MeterChange[] | undefined
   sections: Section[]
   /** The song's own sections, and each setlist's edit of them (by setlist id). */
   own: Section[] | undefined
@@ -35,6 +38,8 @@ function snapshot(song: Song): SongSnapshot {
     clickOffset: song.clickOffset,
     clickStem: song.clickStem ?? null,
     pad: song.pad,
+    tempos: song.tempos?.map((t) => ({ ...t })),
+    meters: song.meters?.map((m) => ({ start: m.start, timeSig: [m.timeSig[0], m.timeSig[1]] })),
     sections: song.sections.map((s) => ({ ...s })),
     own: song.librarySections?.map((s) => ({ ...s })),
     inSetlists: Object.fromEntries(
@@ -54,7 +59,11 @@ export interface ChangeKind {
 }
 
 const kindOf = (a: SongSnapshot, b: SongSnapshot): ChangeKind => ({
-  timing: a.bpm !== b.bpm || a.timeSig.join('/') !== b.timeSig.join('/') || a.clickOffset !== b.clickOffset,
+  timing:
+    a.bpm !== b.bpm ||
+    a.timeSig.join('/') !== b.timeSig.join('/') ||
+    a.clickOffset !== b.clickOffset ||
+    JSON.stringify([a.tempos, a.meters]) !== JSON.stringify([b.tempos, b.meters]),
   clickSource: a.clickStem !== b.clickStem,
 })
 
@@ -75,6 +84,8 @@ function apply(song: Song, snap: SongSnapshot, kind: ChangeKind) {
     clickOffset: snap.clickOffset,
     clickStem: snap.clickStem,
     pad: snap.pad,
+    tempos: snap.tempos?.map((t) => ({ ...t })),
+    meters: snap.meters?.map((m) => ({ start: m.start, timeSig: [m.timeSig[0], m.timeSig[1]] })),
     sections: snap.sections.map((s) => ({ ...s })),
     librarySections: snap.own?.map((s) => ({ ...s })),
   })

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { Engine } from '../audio/engine'
 import { KEYS, type Song } from '../audio/types'
 import { SongSections } from './SongSections'
+import { SongTempos, SongTimeSignatures, TIME_SIGNATURES } from './SongTiming'
 import type { SectionScope } from './Timeline'
 
 /** The audio output devices, kept up to date as they come and go. */
@@ -115,7 +116,17 @@ export function EditPanel({ song, edit, pads }: Omit<EditProps, 'engine'> & { pa
               max={300}
               step={0.1}
               value={song.bpm}
-              onValue={(v) => edit('Change Tempo', () => (song.bpm = v), 'bpm')}
+              onValue={(v) =>
+                edit(
+                  'Change Tempo',
+                  () => {
+                    // The opening tempo; any later changes (Tempo Changes) stay.
+                    song.bpm = v
+                    if (song.tempos?.length) song.tempos[0] = { ...song.tempos[0], bpm: v }
+                  },
+                  'bpm',
+                )
+              }
             />
           </label>
           <label>
@@ -125,11 +136,14 @@ export function EditPanel({ song, edit, pads }: Omit<EditProps, 'engine'> & { pa
               onChange={(e) =>
                 edit(
                   'Change Time Signature',
-                  () => (song.timeSig = e.target.value.split('/').map(Number) as [number, number]),
+                  () => {
+                    song.timeSig = e.target.value.split('/').map(Number) as [number, number]
+                    if (song.meters?.length) song.meters[0] = { ...song.meters[0], timeSig: song.timeSig }
+                  },
                 )
               }
             >
-              {['2/4', '3/4', '4/4', '5/4', '6/8', '12/8'].map((t) => (
+              {[...(TIME_SIGNATURES.includes(song.timeSig.join('/')) ? [] : [song.timeSig.join('/')]), ...TIME_SIGNATURES].map((t) => (
                 <option key={t}>{t}</option>
               ))}
             </select>
@@ -185,6 +199,8 @@ export function EditPanel({ song, edit, pads }: Omit<EditProps, 'engine'> & { pa
   )
 }
 
+export type SongTab = 'song' | 'sections' | 'time' | 'tempo'
+
 /** Song Settings (from a song's ••• menu or EDIT's hold menu): the song editor, in a window. */
 export function SongSettingsDialog({
   engine,
@@ -204,7 +220,7 @@ export function SongSettingsDialog({
   pads?: PadChoices
   /** Where section changes go: this setlist only, or every setlist. */
   scope?: SectionScope
-  tab?: 'song' | 'sections'
+  tab?: SongTab
   onClose: () => void
 }) {
   const [tab, setTab] = useState(initialTab)
@@ -229,6 +245,8 @@ export function SongSettingsDialog({
             [
               ['song', 'Song'],
               ['sections', 'Sections'],
+              ['time', 'Time Changes'],
+              ['tempo', 'Tempo Changes'],
             ] as const
           ).map(([t, name]) => (
             <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
@@ -236,11 +254,10 @@ export function SongSettingsDialog({
             </button>
           ))}
         </div>
-        {tab === 'song' ? (
-          <EditPanel song={song} edit={edit} pads={pads} />
-        ) : (
-          <SongSections engine={engine} song={song} loaded={loaded} edit={edit} scope={scope} />
-        )}
+        {tab === 'song' && <EditPanel song={song} edit={edit} pads={pads} />}
+        {tab === 'sections' && <SongSections engine={engine} song={song} loaded={loaded} edit={edit} scope={scope} />}
+        {tab === 'time' && <SongTimeSignatures engine={engine} song={song} loaded={loaded} edit={edit} />}
+        {tab === 'tempo' && <SongTempos engine={engine} song={song} loaded={loaded} edit={edit} />}
         <div className="dialog-actions">
           <span className="muted">
             Changes save as you make them, and {navigator.platform.includes('Mac') ? '⌘Z' : 'Ctrl+Z'} undoes them.

@@ -1,3 +1,5 @@
+import type { MeterChange, TempoChange } from './grid'
+
 export interface Section {
   id: string
   name: string
@@ -26,6 +28,13 @@ export interface Song {
   timeSig: [number, number]
   /** Seconds at which bar 1, beat 1 of the click falls. */
   clickOffset: number
+  /**
+   * Tempo changes (Song Settings ▸ Tempo Changes), the first from the start; missing or empty:
+   * `bpm` throughout. `bpm` is kept as the first tempo.
+   */
+  tempos?: TempoChange[]
+  /** Time signature changes (Song Settings ▸ Time Changes); missing or empty: `timeSig` throughout. */
+  meters?: MeterChange[]
   duration: number
   /**
    * The sections in the current setlist: that setlist's own edit of them, or else the song's own

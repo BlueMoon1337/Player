@@ -4,7 +4,7 @@
  */
 import { useState } from 'react'
 import type { Engine } from '../audio/engine'
-import { barLength } from '../audio/synth'
+import { nearestBar } from '../audio/grid'
 import { type Song, sectionColor, sectionEnd, uid } from '../audio/types'
 import { promptDialog } from './Ask'
 import { type SectionScope, ScopeBar } from './Timeline'
@@ -58,7 +58,7 @@ export function parseStart(text: string): number | null {
 }
 
 /** A start time you type into: applied when you leave the box or press Return. */
-function StartField({ value, disabled, onCommit }: { value: number; disabled?: boolean; onCommit: (t: number) => boolean }) {
+export function StartField({ value, disabled, onCommit }: { value: number; disabled?: boolean; onCommit: (t: number) => boolean }) {
   const [draft, setDraft] = useState<string | null>(null)
   const [bad, setBad] = useState(false)
   const commit = () => {
@@ -120,8 +120,7 @@ export function SongSections({
       const i = song.sections.length - 1
       const start = song.sections[i].start
       const mid = (start + sectionEnd(song, i)) / 2
-      const bar = barLength(song)
-      t = Math.max(start + 0.1, song.clickOffset + Math.round((mid - song.clickOffset) / bar) * bar)
+      t = Math.max(start + 0.1, nearestBar(song, mid))
     }
     t = Math.min(latest, Math.max(0, t))
     if (clash(t)) return

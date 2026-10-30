@@ -4,7 +4,7 @@
  * spoken by the desktop app (electron/cues.ts); this lays them out in time for a song.
  */
 import type { CueLanguage } from '../settings'
-import { barLength, beatLength } from './synth'
+import { barBefore, beatsBefore, meterMap } from './grid'
 import type { Song } from './types'
 
 type Lang = Exclude<CueLanguage, 'off'>
@@ -78,7 +78,7 @@ export function songCuePhrases(song: Song, lang: Lang, countIn: boolean): string
     const p = cuePhrase(s.name, lang)
     if (p) out.add(p)
   }
-  if (countIn) countWords(lang, song.timeSig[0]).forEach((w) => out.add(w))
+  if (countIn) countWords(lang, Math.max(...meterMap(song).map((m) => m.timeSig[0]))).forEach((w) => out.add(w))
   return [...out]
 }
 
@@ -112,18 +112,19 @@ export function renderCues(
   const sr = first.sampleRate
   const buf = ctx.createBuffer(1, Math.max(1, Math.ceil(song.duration * sr)), sr)
   const data = buf.getChannelData(0)
-  const bar = barLength(song)
-  const beat = beatLength(song)
-  const counts = countIn ? countWords(lang, song.timeSig[0]) : []
   for (const s of song.sections) {
     const phrase = cuePhrase(s.name, lang)
-    const at = s.start - bar
+    // The bar before the section, through any tempo or time signature change.
+    const beats = beatsBefore(song, s.start)
+    const at = beats.length ? beats[0].time : barBefore(song, s.start)
     if (!phrase || at < -0.01) continue
     const sample = samples.get(phrase)
     if (sample) place(data, sr, Math.max(0, at), sample)
-    counts.forEach((w, k) => {
-      const c = samples.get(w)
-      if (c) place(data, sr, at + (k + 1) * beat, c)
+    if (!countIn) continue
+    const words = countWords(lang, beats.length)
+    beats.slice(1).forEach((b, k) => {
+      const c = words[k] && samples.get(words[k])
+      if (c) place(data, sr, b.time, c)
     })
   }
   return buf

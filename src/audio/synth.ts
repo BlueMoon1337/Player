@@ -1,3 +1,4 @@
+import { beatGrid } from './grid'
 import { KEYS, type Section, type Song, type Stem, uid } from './types'
 
 // ---------------------------------------------------------------------------
@@ -78,8 +79,6 @@ export function renderClick(ctx: BaseAudioContext, song: Song, sound: ClickSound
   const length = Math.max(1, Math.ceil(song.duration * sr))
   const make = () => ctx.createBuffer(1, length, sr)
   const bufs = { accent: make(), q: make(), e: make(), s: make() }
-  const beatsPerBar = song.timeSig[0]
-  const beat = beatLength(song)
   const a = bufs.accent.getChannelData(0)
   const q = bufs.q.getChannelData(0)
   const e = bufs.e.getChannelData(0)
@@ -88,31 +87,18 @@ export function renderClick(ctx: BaseAudioContext, song: Song, sound: ClickSound
   const quarterTpl = clickTemplate(sr, 1050, 0.75, sound)
   const eighthTpl = clickTemplate(sr, 880, 0.5, sound)
   const sixteenthTpl = clickTemplate(sr, 720, 0.35, sound)
-  // Beats before the click offset are allowed so pickups get a click too.
-  let n = -Math.floor(song.clickOffset / beat)
-  for (;;) {
-    const t = song.clickOffset + n * beat
-    if (t >= song.duration) break
-    if (t >= 0) {
-      const inBar = ((n % beatsPerBar) + beatsPerBar) % beatsPerBar
-      if (inBar === 0) writeClick(a, t, sr, accentTpl)
-      else writeClick(q, t, sr, quarterTpl)
-      writeClick(e, t + beat / 2, sr, eighthTpl)
-      writeClick(s, t + beat / 4, sr, sixteenthTpl)
-      writeClick(s, t + (3 * beat) / 4, sr, sixteenthTpl)
-    }
-    n++
+  // Every beat of the song, through its tempo and time signature changes; pickups before the
+  // click offset get a click too.
+  for (const b of beatGrid(song)) {
+    const t = b.time
+    if (t < 0) continue
+    if (b.index === 0) writeClick(a, t, sr, accentTpl)
+    else writeClick(q, t, sr, quarterTpl)
+    writeClick(e, t + b.length / 2, sr, eighthTpl)
+    writeClick(s, t + b.length / 4, sr, sixteenthTpl)
+    writeClick(s, t + (3 * b.length) / 4, sr, sixteenthTpl)
   }
   return bufs
-}
-
-/** Tempo is always expressed in beats of the time signature's beat unit. */
-export function beatLength(song: Pick<Song, 'bpm'>): number {
-  return 60 / song.bpm
-}
-
-export function barLength(song: Pick<Song, 'bpm' | 'timeSig'>): number {
-  return beatLength(song) * song.timeSig[0]
 }
 
 // ---------------------------------------------------------------------------

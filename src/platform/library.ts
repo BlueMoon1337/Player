@@ -30,6 +30,8 @@ export function recordFromSong(song: Song): SongRecord {
     artwork,
     clickStem: song.clickStem ?? null,
     pad: song.pad,
+    tempos: song.tempos?.length ? song.tempos : undefined,
+    meters: song.meters?.length ? song.meters : undefined,
   }
 }
 
@@ -51,6 +53,10 @@ export function songFromRecord(rec: SongRecord): Song {
     stemFiles: rec.stems,
     clickStem: rec.clickStem ?? null,
     pad: typeof rec.pad === 'string' ? rec.pad : undefined,
+    tempos: Array.isArray(rec.tempos) ? rec.tempos.filter((t) => Number.isFinite(t?.start) && Number.isFinite(t?.bpm)) : undefined,
+    meters: Array.isArray(rec.meters)
+      ? rec.meters.filter((m) => Number.isFinite(m?.start) && Array.isArray(m?.timeSig) && m.timeSig.every(Number.isFinite))
+      : undefined,
     artwork: rec.artwork ? mediaUrl(rec.id, rec.artwork) : songArtwork(rec.title),
     source: 'library',
   }

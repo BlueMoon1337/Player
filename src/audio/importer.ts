@@ -1,5 +1,6 @@
 import type { AbletonSong } from '../import/ableton'
 import { type SongName, isClickStem } from '../import/multitracks'
+import { clickSamples, detectClickMap, songTiming } from './clickmap'
 import { type AudioInput, DECODERS, decodeAudio, mapLimit } from './decoder'
 import { songArtwork } from './synth'
 import { type Section, type Song, type Stem, uid } from './types'
@@ -159,6 +160,37 @@ export async function importStems(
   const finalSig = set?.timeSig ?? timeSig ?? [4, 4]
   const clickStem = stems.find((s) => isClickStem(s.name))
 
+  // Tempo and time signature changes, and where bar 1 falls: KeyFinder's beat map (exact), else
+  // the Ableton set's automation, else what the click stem plays (a set is trusted over its click).
+  const beatMap = metas.find((m) => m.beatMap)?.beatMap ?? null
+  let timing: ReturnType<typeof songTiming> = { clickOffset: 0 }
+  let timingFrom = ''
+  if (beatMap) {
+    timing = {
+      clickOffset: beatMap.offset,
+      bpm: beatMap.tempos[0].bpm,
+      timeSig: beatMap.meters[0]?.timeSig,
+      tempos: beatMap.tempos.length > 1 ? beatMap.tempos : undefined,
+      meters: beatMap.meters.length > 1 ? beatMap.meters : undefined,
+    }
+    timingFrom = 'KeyFinder'
+  } else if (set && (set.tempos.length > 1 || set.meters.length > 1)) {
+    timing = {
+      clickOffset: 0,
+      bpm: set.tempos.length > 1 ? set.tempos[0].bpm : undefined,
+      timeSig: set.meters[0]?.timeSig,
+      tempos: set.tempos.length > 1 ? set.tempos : undefined,
+      meters: set.meters.length > 1 ? set.meters : undefined,
+    }
+    timingFrom = 'the Ableton set'
+  } else if (clickStem && !set) {
+    const map = detectClickMap(clickSamples(clickStem.buffer), clickStem.buffer.sampleRate, finalSig[1])
+    if (map) {
+      timing = songTiming(map, name?.bpm ?? bpm)
+      timingFrom = `its ${clickStem.name}`
+    }
+  }
+
   const notes: string[] = []
   if (name?.album) {
     notes.push(fromKeyFinder ? `title, ${artist ? 'artist, ' : ''}key and tempo from KeyFinder` : `title, album, key and tempo from the name`)
@@ -170,6 +202,12 @@ export async function importStems(
   if (!name?.bpm && (set?.bpm || bpm)) notes.push(`${finalBpm} BPM`)
   if (timeSig && !set?.timeSig) notes.push(`${timeSig[0]}/${timeSig[1]}`)
   if (clickStem) notes.push(`its ${clickStem.name} as the click`)
+  const changes = [
+    timing.tempos && `${timing.tempos.length - 1} tempo change${timing.tempos.length === 2 ? '' : 's'}`,
+    timing.meters && `${timing.meters.length - 1} time signature change${timing.meters.length === 2 ? '' : 's'}`,
+  ].filter(Boolean)
+  if (changes.length) notes.push(`${changes.join(' and ')} from ${timingFrom}`)
+  else if (timing.timeSig && timingFrom && timing.timeSig.join('/') !== finalSig.join('/')) notes.push(`${timing.timeSig.join('/')} from ${timingFrom}`)
   const warnings: string[] = []
   if (!setMarkers && !markerSource && (set || name?.album)) {
     warnings.push(
@@ -194,9 +232,11 @@ export async function importStems(
     album,
     added: Date.now(),
     key: name?.key ?? 'C',
-    bpm: finalBpm,
-    timeSig: finalSig,
-    clickOffset: 0,
+    bpm: timing.bpm ?? finalBpm,
+    timeSig: timing.timeSig ?? finalSig,
+    clickOffset: timing.clickOffset,
+    tempos: timing.tempos,
+    meters: timing.meters,
     duration,
     sections: setMarkers
       ? sectionsFromMarkers(setMarkers, duration)
