@@ -73,6 +73,12 @@ async function gh(method, url, body, headers = {}) {
 
 async function uploadAsset(name, data, contentType = 'application/octet-stream') {
   const repo = env('GITHUB_REPOSITORY')
+  // A run that's tried again (a Mac build that never got a machine, say) replaces what an earlier
+  // attempt left on the draft: GitHub won't take a second file of the same name.
+  const assets = await gh('GET', `https://api.github.com/repos/${repo}/releases/${env('RELEASE_ID')}/assets?per_page=100`)
+  for (const a of assets.filter((x) => x.name === name)) {
+    await gh('DELETE', `https://api.github.com/repos/${repo}/releases/assets/${a.id}`)
+  }
   const url = `https://uploads.github.com/repos/${repo}/releases/${env('RELEASE_ID')}/assets?name=${encodeURIComponent(name)}`
   await gh('POST', url, data, { 'Content-Type': contentType })
   console.log(`Uploaded ${name}`)

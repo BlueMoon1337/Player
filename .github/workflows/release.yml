@@ -81,7 +81,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          # An Intel Mac builds the same universal app (Player has no native modules), and GitHub
+          # has Intel Macs to spare when its Apple silicon ones are too busy to take the job.
+          - os: macos-15-intel
             target: mac
             platform: darwin
           - os: windows-latest
