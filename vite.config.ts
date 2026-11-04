@@ -6,4 +6,9 @@ export default defineConfig({
   base: './',
   plugins: [react()],
   worker: { format: 'es' },
+  build: {
+    // The limiter worklet ships as its own file: the desktop app's content security policy
+    // (script-src 'self') doesn't run scripts from data: URLs, which small assets would become.
+    assetsInlineLimit: (file) => (file.endsWith('.worklet.js') ? false : undefined),
+  },
 })

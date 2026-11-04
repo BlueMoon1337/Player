@@ -6,6 +6,8 @@ export type AudioInput = ArrayBuffer | Blob | string
 export interface DecodeRequest {
   id: number
   input: AudioInput
+  /** The rate to deliver the samples at (the audio context's): converted in the worker if the file's differs. */
+  sampleRate: number
 }
 
 export type DecodeResponse =
@@ -80,15 +82,16 @@ export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, in
 }
 
 /**
- * Decodes an audio file. The worker reads and decodes WAVs at their native sample rate
- * (with markers/tempo metadata), so large stems never block the UI; anything else falls
- * back to the browser decoder. Takes ownership of an ArrayBuffer input.
+ * Decodes an audio file at the context's sample rate. The worker reads and decodes WAVs (with
+ * markers/tempo metadata) and converts them to that rate with a high-quality filter, so large
+ * stems never block the UI; anything else falls back to the browser decoder, which converts
+ * them itself. Takes ownership of an ArrayBuffer input.
  */
 export async function decodeAudio(ctx: BaseAudioContext, input: AudioInput): Promise<DecodedAudio> {
   const id = nextId++
   const res = await new Promise<DecodeResponse>((resolve) => {
     pending.set(id, resolve)
-    getWorker().postMessage({ id, input } satisfies DecodeRequest, input instanceof ArrayBuffer ? [input] : [])
+    getWorker().postMessage({ id, input, sampleRate: ctx.sampleRate } satisfies DecodeRequest, input instanceof ArrayBuffer ? [input] : [])
   })
   if (res.kind === 'error') throw new Error(res.message)
   if (res.kind === 'pcm') {

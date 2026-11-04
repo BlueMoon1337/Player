@@ -37,9 +37,50 @@ interface Output {
   input: GainNode
   fade: GainNode
   master: GainNode
-  limiter: DynamicsCompressorNode
+  /** The limiter (limiter.worklet.js), or until it has loaded, the compressor chain below. */
+  limiter: AudioNode
+  /** What feeds the device channels: the limiter, or the end of the compressor chain. */
+  tail: AudioNode
   splitter: ChannelSplitterNode | null
 }
+
+/** The lookahead limiter, run on the audio thread. */
+const LIMITER_URL = new URL('./limiter.worklet.js', import.meta.url).href
+
+const LIMIT_DB = -1
+const LIMIT_RATIO = 20
+/**
+ * The make-up gain a DynamicsCompressorNode adds by itself (Web Audio: the reciprocal of its
+ * curve's gain at 0 dBFS, to the power 0.6): +0.57 dB for this limiter, turning every song up
+ * and pushing peaks over the top. It's taken back off after it.
+ */
+const LIMITER_MAKEUP = (10 ** (-(LIMIT_DB + -LIMIT_DB / LIMIT_RATIO) / 20)) ** 0.6
+
+/*
+ * Until the limiter worklet has loaded (or where AudioWorklet is missing), a compressor stands
+ * in, followed by a soft ceiling for what its attack is too slow to catch.
+ */
+
+/** The ceiling's input is scaled by this, so its curve spans ±2 (+6 dBFS) of real level. */
+const CEILING_RANGE = 2
+/**
+ * The ceiling: untouched up to -2 dBFS, then a smooth bend that never passes -0.2 dBFS, so a
+ * peak the limiter misses is rounded off rather than clipped by the audio device (hard clipping
+ * is what sounds crunchy, on every click).
+ */
+const CEILING_CURVE = (() => {
+  const knee = 10 ** (-2 / 20)
+  const top = 10 ** (-0.2 / 20)
+  const n = 8193
+  const curve = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const u = ((i / (n - 1)) * 2 - 1) * CEILING_RANGE
+    const a = Math.abs(u)
+    const y = a <= knee ? a : knee + (top - knee) * Math.tanh((a - knee) / (top - knee))
+    curve[i] = Math.sign(u) * y
+  }
+  return curve
+})()
 
 interface Loop {
   sectionId: string
@@ -180,6 +221,7 @@ export class Engine {
   /** `ctx` is injectable so tests can render the graph offline with any channel count. */
   constructor(ctx?: AudioContext) {
     this.ctx = ctx ?? new AudioContext({ latencyHint: 'interactive' })
+    this.ready = this.loadLimiter()
     this.padInput = this.ctx.createGain()
     const saved = loadMix()
     if (typeof saved.__master?.volume === 'number') this.masterVolume = saved.__master.volume
@@ -356,16 +398,16 @@ export class Engine {
   }
 
   private connectOutput(bus: Bus, out: Output) {
-    out.limiter.disconnect()
+    out.tail.disconnect()
     out.splitter?.disconnect()
     out.splitter = null
     if (busTopChannel(bus) >= this.outputCount) return
     const { kind, index } = parseBus(bus)
     if (kind === 'mono') {
-      out.limiter.connect(this.merger, 0, index)
+      out.tail.connect(this.merger, 0, index)
     } else {
       out.splitter = this.ctx.createChannelSplitter(2)
-      out.limiter.connect(out.splitter)
+      out.tail.connect(out.splitter)
       out.splitter.connect(this.merger, 0, index * 2)
       out.splitter.connect(this.merger, 1, index * 2 + 1)
     }
@@ -385,17 +427,67 @@ export class Engine {
     fade.gain.value = this.fading === 'out' ? 0 : 1
     const master = ctx.createGain()
     master.gain.value = faderToGain(this.masterVolume)
-    const limiter = ctx.createDynamicsCompressor()
-    limiter.threshold.value = -1
-    limiter.knee.value = 0
-    limiter.ratio.value = 20
-    limiter.attack.value = 0.002
-    limiter.release.value = 0.1
-    input.connect(fade).connect(master).connect(limiter)
-    out = { input, fade, master, limiter, splitter: null }
+    input.connect(fade).connect(master)
+    const limiter = this.limiterNode(parseBus(bus).kind === 'mono' ? 1 : 2)
+    let tail: AudioNode = limiter
+    if (limiter instanceof DynamicsCompressorNode) {
+      const trim = ctx.createGain()
+      trim.gain.value = 1 / LIMITER_MAKEUP / CEILING_RANGE
+      const ceiling = ctx.createWaveShaper()
+      ceiling.curve = CEILING_CURVE
+      limiter.connect(trim).connect(ceiling)
+      tail = ceiling
+    }
+    master.connect(limiter)
+    out = { input, fade, master, limiter, tail, splitter: null }
     this.outputs.set(bus, out)
     this.connectOutput(bus, out)
     return out
+  }
+
+  private limiterLoaded = false
+  /** Resolves once the lookahead limiter is in every output (or can't be, and the compressor stays). */
+  readonly ready: Promise<void>
+
+  /** A limiter for an output of `channels` channels: the lookahead one once loaded, else a compressor. */
+  private limiterNode(channels: number): AudioNode {
+    if (this.limiterLoaded) {
+      return new AudioWorkletNode(this.ctx, 'player-limiter', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        channelCount: channels,
+        channelCountMode: 'explicit',
+        outputChannelCount: [channels],
+        processorOptions: { ceiling: LIMIT_DB, lookahead: 0.0015, release: 0.08 },
+      })
+    }
+    const c = this.ctx.createDynamicsCompressor()
+    c.threshold.value = LIMIT_DB
+    c.knee.value = 0
+    c.ratio.value = LIMIT_RATIO
+    c.attack.value = 0.002
+    c.release.value = 0.1
+    return c
+  }
+
+  /** Puts the lookahead limiter in place of the stand-in in every output made before it loaded. */
+  private async loadLimiter() {
+    try {
+      await this.ctx.audioWorklet.addModule(LIMITER_URL)
+    } catch {
+      return // no AudioWorklet here: the compressor and ceiling stay
+    }
+    this.limiterLoaded = true
+    for (const [bus, out] of this.outputs) {
+      if (!(out.limiter instanceof DynamicsCompressorNode)) continue
+      const limiter = this.limiterNode(parseBus(bus).kind === 'mono' ? 1 : 2)
+      out.master.disconnect(out.limiter)
+      out.tail.disconnect()
+      out.master.connect(limiter)
+      out.limiter = limiter
+      out.tail = limiter
+      this.connectOutput(bus, out)
+    }
   }
 
   /** Falls back to Main when a route needs more outputs than the device has. */

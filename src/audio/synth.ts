@@ -12,8 +12,6 @@ export interface ClickBuffers {
   s: AudioBuffer
 }
 
-const CLICK_SAMPLE_RATE = 16000
-
 /** The built-in click sounds (Settings ▸ Click Sound). */
 export type ClickSoundName = 'classic' | 'woodblock' | 'hihat' | 'beep'
 
@@ -51,8 +49,10 @@ function clickTemplate(sr: number, freq: number, amp: number, sound: ClickSoundN
       prev = n
       out[i] = amp * 1.3 * attack * Math.exp(-t * (freq > 1500 ? 110 : 160)) * hp
     } else if (sound === 'beep') {
-      const sq = Math.sin(2 * Math.PI * freq * t) >= 0 ? 1 : -1
-      out[i] = amp * 0.45 * attack * (t < len - 0.01 ? 1 : Math.max(0, (len - t) / 0.01)) * sq
+      // A square wave from its odd harmonics up to 8 kHz: a sharp-edged one aliases into grit.
+      let sq = 0
+      for (let k = 1; k * freq < Math.min(8000, sr * 0.45); k += 2) sq += Math.sin(2 * Math.PI * k * freq * t) / k
+      out[i] = amp * 0.45 * (4 / Math.PI) * attack * (t < len - 0.01 ? 1 : Math.max(0, (len - t) / 0.01)) * sq
     } else {
       out[i] = amp * Math.exp(-t * 140) * attack * Math.sin(2 * Math.PI * freq * t)
     }
@@ -72,10 +72,11 @@ function writeClick(data: Float32Array, at: number, sr: number, tpl: Float32Arra
  * can be started alongside the stems and stay locked to them, including through loops.
  */
 export function renderClick(ctx: BaseAudioContext, song: Song, sound: ClickSoundName = 'classic'): ClickBuffers {
-  // Clicks are tones of at most 1.65 kHz, so 16 kHz is plenty. Playback resamples them and
-  // positions loops in fractional frames, so they stay locked to stems at any device rate,
-  // at a third of the memory a full-rate render would take for a long song.
-  const sr = CLICK_SAMPLE_RATE
+  // Half the device's rate: playback doubles it by straight-line interpolation, whose images
+  // then land at 20 kHz and up, out of earshot, where a lower rate put them at 14-18 kHz, a
+  // grit on every click. Loops are positioned in fractional frames, so the click stays locked to
+  // the stems, at half the memory a full-rate render would take for a long song.
+  const sr = Math.round(ctx.sampleRate / 2)
   const length = Math.max(1, Math.ceil(song.duration * sr))
   const make = () => ctx.createBuffer(1, length, sr)
   const bufs = { accent: make(), q: make(), e: make(), s: make() }
