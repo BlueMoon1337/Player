@@ -1036,6 +1036,19 @@ button.small {
   align-items: flex-start;
   gap: 14px;
 }
+.toast-action {
+  flex: none;
+  margin: -3px 0;
+}
+.toast.export-status {
+  cursor: default;
+}
+.set-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
 .toast-close {
   flex: none;
   opacity: 0.6;

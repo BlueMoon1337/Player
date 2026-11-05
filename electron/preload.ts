@@ -33,6 +33,18 @@ const api: DesktopAPI = {
   pathForFile: (file) => webUtils.getPathForFile(file),
   setActive: (active) => ipcRenderer.send('app:active', active),
   setMenuState: (state) => ipcRenderer.send('app:menu-state', state),
+  selfExport: {
+    formats: () => ipcRenderer.invoke('app:export-formats'),
+    save: (format) => ipcRenderer.invoke('app:export', format),
+    show: () => ipcRenderer.invoke('app:show-export'),
+    onProgress: (cb) => {
+      const listener = (_e: Electron.IpcRendererEvent, done: number | null) => cb(done)
+      ipcRenderer.on('app:export-progress', listener)
+      return () => {
+        ipcRenderer.removeListener('app:export-progress', listener)
+      }
+    },
+  },
   updates: {
     info: () => ipcRenderer.invoke('updates:info'),
     setToken: (token) => ipcRenderer.invoke('updates:set-token', token),

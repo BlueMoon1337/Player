@@ -24,6 +24,7 @@ import * as updates from './updates'
 import { AUDIO_EXTENSIONS, importPaths } from './importer'
 import { importPads } from './pads'
 import { CUE_LANGUAGES, type CueLanguage, cleanPhrase, renderCues } from './cues'
+import { type ExportFormat, exportApp, exportFile, exportFormats } from './selfExport'
 
 /** Where spoken cues are kept: they're made by this computer's voices, so not in the library. */
 const cuesRoot = () => path.join(app.getPath('userData'), 'cues')
@@ -260,6 +261,11 @@ function buildMenu() {
     click: () => send('settings'),
   }
   const checkUpdates: MenuItemConstructorOptions = { label: 'Check for Updates…', click: () => send('check-updates') }
+  const formatLabel: Record<ExportFormat, string> = { dmg: 'Disk Image (.dmg)…', zip: 'Zip Archive (.zip)…', appimage: 'AppImage…' }
+  const formats = exportFormats()
+  const exportPlayer: MenuItemConstructorOptions = formats.length
+    ? { label: 'Export Player', submenu: formats.map((f) => ({ label: formatLabel[f], click: () => send(`export-app:${f}`) })) }
+    : { label: 'Export Player (installed app only)', enabled: false }
   // Single-key shortcuts (Space, arrows, F, L, 1-9) are handled by the renderer so they
   // never fire while typing in a text field; the menu just names them.
   const template: MenuItemConstructorOptions[] = [
@@ -291,6 +297,8 @@ function buildMenu() {
         { label: 'Import Folder…', accelerator: 'CmdOrCtrl+Shift+I', click: () => send('import-folder') },
         sep,
         { label: 'Open Library Folder', click: () => void shell.openPath(library.root) },
+        sep,
+        exportPlayer,
         ...(isMac ? [] : [sep, settings, sep, { role: 'quit' } as MenuItemConstructorOptions]),
       ],
     },
@@ -469,6 +477,36 @@ function registerIpc() {
   handle('library:restore', (id: unknown) => library.restoreSong(id as string))
   handle('library:save-state', (state: LibraryState) => library.saveState(state))
   handle('library:sizes', () => library.sizes())
+
+  // Export Player: the file is chosen here, in a save dialog, and only that file is written.
+  let lastExport: string | null = null
+  handle('app:export-formats', () => exportFormats())
+  handle('app:export', async (format: unknown) => {
+    if (!win || !exportFormats().includes(format as ExportFormat)) throw new Error('Player can’t be exported in that format here.')
+    const { name, filter } = exportFile(format as ExportFormat)
+    const res = await dialog.showSaveDialog(win, {
+      title: 'Export Player',
+      defaultPath: path.join(app.getPath('desktop'), name),
+      filters: [filter],
+    })
+    if (res.canceled || !res.filePath) return null
+    const target = win
+    target.setProgressBar(2) // indeterminate until there's a share to show
+    try {
+      await exportApp(format as ExportFormat, res.filePath, (done) => {
+        if (target.isDestroyed()) return
+        target.setProgressBar(done ?? 2)
+        target.webContents.send('app:export-progress', done)
+      })
+    } finally {
+      if (!target.isDestroyed()) target.setProgressBar(-1)
+    }
+    lastExport = res.filePath
+    return { file: path.basename(res.filePath) }
+  })
+  handle('app:show-export', () => {
+    if (lastExport) shell.showItemInFolder(lastExport)
+  })
 
   handle('updates:info', () => ({ version: app.getVersion(), hasToken: updates.hasToken(), blocker: updates.blocker() }))
   handle('updates:set-token', (token: unknown) => updates.setToken(token))

@@ -15,6 +15,7 @@ A multitrack backing-track player for live worship and band use, in the spirit o
   - Only one copy of the app can run at a time.
   - The window size and position are remembered.
 - **Update button.** Player checks GitHub for new releases and installs signed updates itself (see [Updates](#updates)).
+- **Export Player.** File ▸ Export Player (or Settings ▸ About) saves a copy of the installed app to take to another computer without going online: on a Mac a disk image (Player.app with an Applications shortcut, made with `hdiutil`) or a zip (made with `ditto`, keeping the app's links, permissions and signature); on Windows a zip of the installed Player folder, to unzip anywhere and run `Player.exe`; on Linux the AppImage itself or a zip of it. Songs aren't included: they stay in the library folder.
 - **Native menus.** File ▸ Import Stems… (⌘/Ctrl+I), Edit (Undo and Redo, named after the step), Transport, View (Setlists & Library ⌘/Ctrl+L, setlist row, edit mode, outputs, pad, full screen) and Settings (⌘/Ctrl+,).
 
 ## Features (desktop and web)

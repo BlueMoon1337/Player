@@ -108,6 +108,8 @@ export interface ImportProgress {
   total: number
 }
 
+export type ExportFormat = 'dmg' | 'zip' | 'appimage'
+
 export type MenuCommand =
   | 'import'
   | 'import-folder'
@@ -125,6 +127,7 @@ export type MenuCommand =
   | 'pad'
   | 'settings'
   | 'check-updates'
+  | `export-app:${ExportFormat}`
   | 'song-settings'
   | 'setlists'
   | 'undo'
@@ -192,6 +195,17 @@ export interface DesktopAPI {
   /** Tells the app audio is running: keeps the display awake and guards against quitting. */
   setActive(active: boolean): void
   setMenuState(state: MenuState): void
+  /** Export Player: a copy of this installed app, as a disk image, zip or AppImage. */
+  selfExport: {
+    /** The formats this copy can be exported as; none in a development build. */
+    formats(): Promise<ExportFormat[]>
+    /** Asks where to save it, then writes it; null if the dialog was cancelled. */
+    save(format: ExportFormat): Promise<{ file: string } | null>
+    /** Shows the last exported file in Finder / Explorer. */
+    show(): Promise<void>
+    /** The share written (0..1), or null while it can't be told. */
+    onProgress(cb: (done: number | null) => void): () => void
+  }
   updates: {
     info(): Promise<UpdateInfo>
     /** Keeps the read-only GitHub token in the main process; '' forgets it. */

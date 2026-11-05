@@ -39,7 +39,7 @@ import { type MenuCommand, desktop } from './platform'
 import { useSettings } from './settings'
 import { renderCues, songCuePhrases } from './audio/cues'
 import { decodeAudio } from './audio/decoder'
-import { type PadRecord, type SongEndSetting, cueUrl, padUrl } from './platform/types'
+import { type ExportFormat, type PadRecord, type SongEndSetting, cueUrl, padUrl } from './platform/types'
 import { type LibraryImport, importIntoLibrary, loadSongStems, recordFromSong } from './platform/library'
 import { PAD_FILE, keyFromFileName, padNameFromFiles } from './import/pads'
 import { readZipPad, readZipSong } from './import/webZip'
@@ -80,7 +80,7 @@ function loadSettings(): { jumpMode: JumpMode; fadeSeconds: number; link: boolea
   }
 }
 
-type Notice = { kind: 'info' | 'warn' | 'error'; text: string }
+type Notice = { kind: 'info' | 'warn' | 'error'; text: string; action?: { label: string; run: () => void } }
 
 function importNotice({ results, failed }: LibraryImport): Notice {
   const skipped = [...failed, ...results.flatMap((r) => r.skipped)]
@@ -115,6 +115,30 @@ export default function App() {
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
+  /** Export Player: what this copy can be exported as, and while exporting, how far (null: can't tell). */
+  const [exportFormats, setExportFormats] = useState<ExportFormat[]>([])
+  const [exporting, setExporting] = useState<number | null | false>(false)
+  useEffect(() => {
+    desktop?.selfExport.formats().then(setExportFormats, () => {})
+    return desktop?.selfExport.onProgress(setExporting)
+  }, [])
+  const exportPlayer = async (format: ExportFormat) => {
+    if (!desktop || exporting !== false) return
+    try {
+      const done = await desktop.selfExport.save(format)
+      if (done) {
+        setNotice({
+          kind: 'info',
+          text: `Exported Player ${updates.version ?? ''} as ${done.file}.`,
+          action: { label: desktop.platform === 'darwin' ? 'Show in Finder' : 'Show in Folder', run: () => void desktop!.selfExport.show() },
+        })
+      }
+    } catch (e) {
+      setNotice({ kind: 'error', text: `Couldn't export Player: ${(e as Error).message}` })
+    } finally {
+      setExporting(false)
+    }
+  }
   const [version, setVersion] = useState(0)
   // Edit mode: Playback's "Setlist / Song Map".
   const [editing, setEditingState] = useState(false)
@@ -764,6 +788,7 @@ export default function App() {
     else if (cmd === 'outputs') setSettingsTab('buses')
     else if (cmd === 'pad') setLowerView('pad')
     else if (cmd === 'settings') setSettingsTab('general')
+    else if (cmd.startsWith('export-app:')) void exportPlayer(cmd.slice('export-app:'.length) as ExportFormat)
     else if (cmd === 'check-updates') {
       setSettingsTab(null)
       setUpdateOpen(true)
@@ -986,6 +1011,7 @@ export default function App() {
                 }
               : undefined
           }
+          exportPlayer={desktop ? { formats: exportFormats, busy: exporting !== false, run: (f) => void exportPlayer(f) } : undefined}
           onClose={() => setSettingsTab(null)}
         />
       )}
@@ -1026,8 +1052,28 @@ export default function App() {
         // Gone as soon as it's pressed (not on release), so a click that moves a little still counts.
         <div className={`toast ${notice.kind}`} onPointerDown={() => setNotice(null)} role="status" title="Click to close">
           <span>{notice.text}</span>
+          {notice.action && (
+            // Acts on pointer-down, as the notice closes then.
+            <button
+              className="small toast-action"
+              onPointerDown={(e) => {
+                e.stopPropagation()
+                notice.action!.run()
+                setNotice(null)
+              }}
+            >
+              {notice.action.label}
+            </button>
+          )}
           <span className="toast-close" aria-label="Close">
             ✕
+          </span>
+        </div>
+      )}
+      {exporting !== false && (
+        <div className="toast info export-status" role="status">
+          <span>
+            Exporting Player…{typeof exporting === 'number' ? ` ${Math.round(exporting * 100)}%` : ' (a disk image takes a minute or so)'}
           </span>
         </div>
       )}

@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useState } from 'react'
 import type { Engine, EngineState, JumpMode } from '../audio/engine'
 import { desktop } from '../platform'
+import type { ExportFormat } from '../platform/types'
 import { type ClickSound, type CueLanguage, setSetting, useSettings } from '../settings'
 import { useAudioDevices } from './Panels'
 import { BusesTab, TracksTab } from './RoutingTabs'
@@ -29,8 +30,12 @@ interface Props {
   onRevealLibrary?: () => void
   /** Desktop only: this version, whether a newer one is ready, and opening the Update window. */
   update?: { version: string | null; ready: string | null; onOpen: () => void }
+  /** Desktop only: Export Player, in the formats this copy can be exported as (none in a development build). */
+  exportPlayer?: { formats: ExportFormat[]; busy: boolean; run: (format: ExportFormat) => void }
   onClose: () => void
 }
+
+const EXPORT_LABELS: Record<ExportFormat, string> = { dmg: 'Disk Image…', zip: 'Zip…', appimage: 'AppImage…' }
 
 const CLICK_SOUNDS: [ClickSound, string][] = [
   ['classic', 'Classic'],
@@ -258,6 +263,25 @@ export function SettingsDialog(p: Props) {
             <button className={`small ${p.update.ready ? 'primary' : ''}`} onClick={p.update.onOpen}>
               Update…
             </button>
+          </Row>
+        )}
+        {p.exportPlayer && (
+          <Row
+            title="Export Player"
+            desc={
+              p.exportPlayer.formats.length
+                ? 'A copy of this app to take to another computer, without going online. Your songs stay in the library folder.'
+                : 'Only an installed copy of Player can export itself.'
+            }
+            disabled={!p.exportPlayer.formats.length}
+          >
+            <div className="set-buttons">
+              {p.exportPlayer.formats.map((f) => (
+                <button key={f} className="small" disabled={p.exportPlayer!.busy} onClick={() => p.exportPlayer!.run(f)}>
+                  {EXPORT_LABELS[f]}
+                </button>
+              ))}
+            </div>
           </Row>
         )}
         {p.libraryRoot && (
