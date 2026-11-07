@@ -574,6 +574,9 @@ function setupPermissions() {
 }
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+// Lets the window free a song's audio (gigabytes, for a long MultiTracks song) as soon as it's let
+// go, before the next one is read, instead of whenever JavaScript would get round to it.
+app.commandLine.appendSwitch('js-flags', '--expose-gc')
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()

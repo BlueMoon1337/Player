@@ -38,7 +38,7 @@ import {
 import { type MenuCommand, desktop } from './platform'
 import { useSettings } from './settings'
 import { renderCues, songCuePhrases } from './audio/cues'
-import { decodeAudio } from './audio/decoder'
+import { decodeAudio, freeMemory } from './audio/decoder'
 import { type ExportFormat, type PadRecord, type SongEndSetting, cueUrl, padUrl } from './platform/types'
 import { type LibraryImport, importIntoLibrary, loadSongStems, recordFromSong } from './platform/library'
 import { PAD_FILE, keyFromFileName, padNameFromFiles } from './import/pads'
@@ -490,11 +490,16 @@ export default function App() {
         target.stems = renderDemoStems(engine.ctx, target)
       } else {
         if (!quiet) setLoading(`Loading “${target.title}”…`)
-        const { stems, missing } = await loadSongStems(engine.ctx, target, (d, t, n) => {
+        const { stems, missing, outOfMemory } = await loadSongStems(engine.ctx, target, (d, t, n) => {
           if (!quiet) setLoading(progressText('Loading')(d, t, n))
         })
         target.stems = stems
-        if (missing.length) {
+        if (outOfMemory) {
+          setNotice({
+            kind: 'error',
+            text: `“${target.title}”: there wasn't enough memory for ${missing.length} of its stems. Close other apps and choose the song again.`,
+          })
+        } else if (missing.length) {
           setNotice({ kind: 'warn', text: `“${target.title}”: couldn't load ${missing.join(', ')}` })
         }
       }
@@ -517,7 +522,16 @@ export default function App() {
       const target = lib.songs[id]
       if (!target) return
       const handoff = typeof start === 'object' ? start : null
-      if (!handoff) engine.pause()
+      if (!handoff) {
+        engine.pause()
+        if (!target.stems.length && target.source !== 'user') {
+          // Room first: a long MultiTracks song takes gigabytes, so the song that was loaded (and
+          // any read ahead) is let go before this one is read, not after.
+          engine.release()
+          for (const s of Object.values(lib.songs)) if (s.id !== id && s.source !== 'user') s.stems = []
+          freeMemory()
+        }
+      }
       await ensureStems(target, !!handoff)
       // Demo and library stems can be reloaded at any time, so only keep the current song in memory.
       for (const s of Object.values(lib.songs)) if (s.id !== id && s.source !== 'user') s.stems = []
@@ -636,12 +650,22 @@ export default function App() {
     setNotice(null)
     setLoading('Importing…')
     try {
+      // Room first, as when choosing a song: what's loaded is let go before the new songs are read
+      // (and loaded again if nothing comes of the import).
+      const previous = engine.currentSong?.id ?? null
+      engine.pause()
+      engine.release()
+      for (const s of Object.values(getLibrary().songs)) if (s.source !== 'user') s.stems = []
+      freeMemory()
       const imported = await job(setLoading)
       const { results, failed } = imported
-      if (!results.length) throw new Error(failed.map((f) => `${f.name}: ${f.reason}`).join('; ') || 'nothing to import')
+      if (!results.length) {
+        if (previous) void selectSong(previous)
+        throw new Error(failed.map((f) => `${f.name}: ${f.reason}`).join('; ') || 'nothing to import')
+      }
       const songs = results.map((r) => r.song)
       importSongs(songs)
-      for (const s of songs) peaks.current.set(s.id, computePeaks(s.stems, s.duration))
+      for (const s of songs) if (!peaks.current.has(s.id)) peaks.current.set(s.id, computePeaks(s.stems, s.duration))
       // Keep only the song being loaded in memory; library songs reload from disk when chosen.
       for (const s of songs.slice(1)) if (s.source === 'library') s.stems = []
       engine.pause()
@@ -657,12 +681,23 @@ export default function App() {
       setLoading(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [padFollow])
+  }, [padFollow, selectSong])
 
   /** Desktop: zips, folders and audio files are copied (unzipped) into the library, then decoded. */
   const importPaths = useCallback(
     (paths: string[]) => {
-      if (desktop && paths.length) void runImport((status) => importIntoLibrary(desktop!, engine.ctx, paths, status))
+      if (desktop && paths.length) {
+        void runImport((status) =>
+          importIntoLibrary(desktop!, engine.ctx, paths, status, (song, first) => {
+            // Only the song that will be loaded keeps its audio; the others read again from disk when chosen.
+            peaks.current.set(song.id, computePeaks(song.stems, song.duration))
+            if (!first) {
+              song.stems = []
+              freeMemory()
+            }
+          }),
+        )
+      }
     },
     [runImport],
   )

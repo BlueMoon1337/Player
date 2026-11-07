@@ -11,7 +11,7 @@ export interface DecodeRequest {
 }
 
 export type DecodeResponse =
-  | { id: number; kind: 'pcm'; sampleRate: number; channels: Float32Array[]; meta: WavMeta }
+  | { id: number; kind: 'pcm'; sampleRate: number; channels: Float32Array[]; folded: boolean; meta: WavMeta }
   | { id: number; kind: 'fallback'; data: ArrayBuffer; meta: WavMeta | null; encoding: string | null }
   | { id: number; kind: 'error'; message: string }
 
@@ -19,6 +19,21 @@ export interface DecodedAudio {
   buffer: AudioBuffer
   meta: WavMeta | null
 }
+
+/** Stereo files whose channels were the same, kept as one channel; they're played on both sides. */
+const foldedStereo = new WeakSet<AudioBuffer>()
+export const isFoldedStereo = (buffer: AudioBuffer) => foldedStereo.has(buffer)
+
+/**
+ * Frees audio that's been let go, now (the desktop app allows it): a song's stems take gigabytes,
+ * and the next song shouldn't be read while the last one's are still waiting to be collected.
+ */
+export function freeMemory() {
+  ;(globalThis as { gc?: () => void }).gc?.()
+}
+
+/** Running out of memory, as opposed to a file that can't be read. */
+export const isOutOfMemory = (e: unknown) => /allocation failed|out of memory|createBuffer\(/i.test((e as Error)?.message ?? '')
 
 /** Frames copied per slice: ~2 MB per channel, a few tens of ms even on slow memory. */
 const COPY_SLICE = 1 << 19
@@ -97,6 +112,7 @@ export async function decodeAudio(ctx: BaseAudioContext, input: AudioInput): Pro
   if (res.kind === 'pcm') {
     const buffer = ctx.createBuffer(res.channels.length, res.channels[0].length, res.sampleRate)
     await fillBuffer(buffer, res.channels)
+    if (res.folded) foldedStereo.add(buffer)
     return { buffer, meta: res.meta }
   }
   try {

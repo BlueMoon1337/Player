@@ -1,4 +1,5 @@
 import { BUSES, type BusId, autoPanOutput, busOutput, trackBus } from './routing'
+import { freeMemory, isFoldedStereo } from './decoder'
 import { barBefore, nextBar } from './grid'
 import { type ClickSoundName, renderClick } from './synth'
 import { type Bus, type ChannelSettings, CLICK_CHANNELS, type Song, busTopChannel, isReferenceName, parseBus, sectionEnd } from './types'
@@ -703,6 +704,13 @@ export class Engine {
       // A click stem (e.g. MultiTracks' Click Track) joins the click group and feeds the Click bus.
       const ch = this.createChannel(stem.id, stem.name, stem.id === song.clickStem ? 'click' : 'stem', true)
       ch.buffer = stem.buffer
+      if (isFoldedStereo(stem.buffer)) {
+        // Kept as one channel but stereo in the file: out of both sides at its full level, as
+        // before (a mono input to the stereo panner would come out 3 dB down).
+        ch.input.channelCount = 2
+        ch.input.channelCountMode = 'explicit'
+        ch.input.channelInterpretation = 'speakers'
+      }
     }
     this.regenerateClick()
     this.applyGains()
@@ -811,6 +819,24 @@ export class Engine {
       this.channels.delete(id)
       this.order = this.order.filter((o) => o !== id)
     }
+  }
+
+  /**
+   * Lets go of the loaded song's audio, to make room before another song is read: a long
+   * MultiTracks song can take a few gigabytes, and two at once may not fit.
+   */
+  release() {
+    this.transportRequest++
+    this.stopSources()
+    this.playing = false
+    this.loop = null
+    this.pendingJump = null
+    this.handoffAt = null
+    this.dropSongChannels()
+    for (const c of CLICK_CHANNELS) this.channels.get(c.id)!.buffer = null
+    this.song = null
+    this.emit()
+    freeMemory()
   }
 
   /** Whether the loaded song plays its own click stem instead of the generated click. */

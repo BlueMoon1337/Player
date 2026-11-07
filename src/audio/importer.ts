@@ -1,7 +1,7 @@
 import type { AbletonSong } from '../import/ableton'
 import { type SongName, isClickStem } from '../import/multitracks'
 import { clickSamples, detectClickMap, songTiming } from './clickmap'
-import { type AudioInput, DECODERS, decodeAudio, mapLimit } from './decoder'
+import { type AudioInput, DECODERS, decodeAudio, isOutOfMemory, mapLimit } from './decoder'
 import { songArtwork } from './synth'
 import { type Section, type Song, type Stem, uid } from './types'
 import type { WavMeta } from './wav'
@@ -101,6 +101,7 @@ export async function importStems(
   if (audio.length === 0) throw new Error('No audio files found')
 
   // A few at a time: as fast as the decoders allow, without holding every file in memory at once.
+  const outOfMemory: string[] = []
   let finished = 0
   opts.onProgress?.(0, audio.length, audio[0].name)
   const results = await mapLimit(audio, DECODERS, async (src) => {
@@ -110,6 +111,11 @@ export async function importStems(
       const { buffer, meta } = await decodeAudio(ctx, input)
       return { source: src, bytes, buffer, meta } as Decoded
     } catch (e) {
+      // Out of memory says nothing about the file: it isn't skipped (or deleted), the import stops.
+      if (isOutOfMemory(e)) {
+        outOfMemory.push(src.name)
+        return null
+      }
       skipped.push({ name: src.name, reason: (e as Error).message })
       if (src.file) skippedFiles.push(src.file)
       return null
@@ -118,6 +124,11 @@ export async function importStems(
       if (finished < audio.length) opts.onProgress?.(finished, audio.length, audio[finished]?.name ?? src.name)
     }
   })
+  if (outOfMemory.length) {
+    throw new Error(
+      `there wasn't enough memory to read ${outOfMemory.length} of its ${audio.length} stems. Close other apps (or songs) and import it again.`,
+    )
+  }
   const decoded = results.filter((d): d is Decoded => d !== null)
   if (decoded.length === 0) {
     throw new Error(skipped.map((s) => `${s.name}: ${s.reason}`).join('; '))

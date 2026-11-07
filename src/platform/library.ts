@@ -1,4 +1,4 @@
-import { DECODERS, decodeAudio, mapLimit } from '../audio/decoder'
+import { DECODERS, decodeAudio, isOutOfMemory, mapLimit } from '../audio/decoder'
 import { type ImportResult, type StemSource, importStems } from '../audio/importer'
 import { songArtwork } from '../audio/synth'
 import type { Song, Stem } from '../audio/types'
@@ -67,9 +67,10 @@ export async function loadSongStems(
   ctx: AudioContext,
   song: Song,
   onProgress: (done: number, total: number, name: string) => void,
-): Promise<{ stems: Stem[]; missing: string[] }> {
+): Promise<{ stems: Stem[]; missing: string[]; outOfMemory: boolean }> {
   const files = song.stemFiles ?? []
   const missing: string[] = []
+  let outOfMemory = false
   let finished = 0
   if (files.length) onProgress(0, files.length, files[0].name)
   const loaded = await mapLimit(files, DECODERS, async (f) => {
@@ -77,6 +78,7 @@ export async function loadSongStems(
       const { buffer } = await decodeAudio(ctx, mediaUrl(song.id, f.file))
       return { id: f.id, name: f.name, buffer, file: f.file } as Stem
     } catch (e) {
+      if (isOutOfMemory(e)) outOfMemory = true
       missing.push(`${f.file} (${(e as Error).message})`)
       return null
     } finally {
@@ -84,7 +86,7 @@ export async function loadSongStems(
       if (finished < files.length) onProgress(finished, files.length, files[finished]?.name ?? f.name)
     }
   })
-  return { stems: loaded.filter((s): s is Stem => s !== null), missing }
+  return { stems: loaded.filter((s): s is Stem => s !== null), missing, outOfMemory }
 }
 
 export interface LibraryImport {
@@ -128,6 +130,8 @@ export async function importIntoLibrary(
   ctx: AudioContext,
   paths: string[],
   onStatus: (text: string) => void,
+  /** Each song as soon as it's read (`first`: the one that will be loaded), so the others' audio can be let go. */
+  onSong?: (song: Song, first: boolean) => void,
 ): Promise<LibraryImport> {
   const stop = api.library.onImportProgress((p) => {
     const pct = p.total ? ` ${Math.floor((100 * p.done) / p.total)}%` : ''
@@ -150,9 +154,9 @@ export async function importIntoLibrary(
     }
     try {
       const which = created.length > 1 ? ` (${i + 1} of ${created.length})` : ''
-      results.push(
-        await finishSong(api, ctx, c, (d, t, n) => onStatus(`Decoding ${label}${which}: ${t > 1 ? `${d + 1} of ${t}, ` : ''}${n}`)),
-      )
+      const result = await finishSong(api, ctx, c, (d, t, n) => onStatus(`Decoding ${label}${which}: ${t > 1 ? `${d + 1} of ${t}, ` : ''}${n}`))
+      onSong?.(result.song, results.length === 0)
+      results.push(result)
     } catch (e) {
       failed.push({ name: label, reason: (e as Error).message })
     }
