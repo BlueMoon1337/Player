@@ -687,6 +687,7 @@ export class Engine {
 
   /** Loads a song (with stems already decoded/rendered). Stops playback. */
   load(song: Song) {
+    this.transportRequest++
     this.stopSources()
     this.playing = false
     this.pausedPos = 0
@@ -911,9 +912,18 @@ export class Engine {
     }
   }
 
+  /**
+   * Bumped by every play, pause and song load. A play that had to wait for the audio device to
+   * wake up goes ahead only if nothing came after it: otherwise a Stop pressed meanwhile would be
+   * undone, and two Plays would start the song twice, one copy beyond the reach of Stop.
+   */
+  private transportRequest = 0
+
   async play() {
     if (!this.song || this.playing) return
+    const request = ++this.transportRequest
     if (this.ctx.state !== 'running') await this.ctx.resume()
+    if (request !== this.transportRequest || !this.song || this.playing) return
     if (this.fading !== 'in') this.cancelFade()
     if (this.pausedPos >= this.song.duration - 0.05) this.pausedPos = 0
     // Song Section Pre-roll: from the start of a section, start a bar early, the click counting
@@ -944,6 +954,7 @@ export class Engine {
   }
 
   pause() {
+    this.transportRequest++
     if (!this.playing) return
     this.pausedPos = this.position
     this.stopSources()
@@ -1093,7 +1104,9 @@ export class Engine {
   /** Starts playback from silence and brings the tracks up over `seconds`. */
   async fadeIn(seconds = this.fadeSeconds) {
     if (!this.song || this.playing) return
+    const request = ++this.transportRequest
     if (this.ctx.state !== 'running') await this.ctx.resume()
+    if (request !== this.transportRequest || this.playing) return
     window.clearTimeout(this.fadeTimer)
     this.fading = 'in'
     this.rampFade(1, seconds, 0)

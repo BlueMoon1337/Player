@@ -226,11 +226,19 @@ export class PadPlayer {
     this.voice = null
   }
 
+  /**
+   * Turns the pad on or off at once, in the order asked. Only waking the audio context up waits:
+   * an "on" that waited for it before starting could finish after a later "off" and leave the
+   * pad playing while it shows as off.
+   */
   async setOn(on: boolean) {
-    if (this.ctx.state !== 'running') await this.ctx.resume()
     this.on = on
-    if (on && !this.voice) this.voice = this.startVoice(this.key)
-    if (!on) this.stopVoice()
+    if (!on) {
+      this.stopVoice()
+      return
+    }
+    if (!this.voice) this.voice = this.startVoice(this.key)
+    if (this.ctx.state !== 'running') await this.ctx.resume()
   }
 
   /** Crossfades to a new key if the pad is playing. */
