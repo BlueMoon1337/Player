@@ -4,6 +4,7 @@
  */
 import { useState } from 'react'
 import type { Engine } from '../audio/engine'
+import { hasCuts, playedLength, toHeard, toSong } from '../audio/arrangement'
 import { nearestBar } from '../audio/grid'
 import { type Song, sectionColor, sectionEnd, uid } from '../audio/types'
 import { promptDialog } from './Ask'
@@ -138,6 +139,19 @@ export function SongSections({
       <div className="sec-list" role="list">
         {song.sections.map((s, i) => {
           const choices = SECTION_CHOICES.includes(s.name) ? SECTION_CHOICES : [s.name, ...SECTION_CHOICES]
+          if (s.skip) {
+            // Cut: its music is left out of this arrangement.
+            return (
+              <div key={s.id} className="sec-row cut" role="listitem" style={{ ['--c' as string]: sectionColor(s.name) }}>
+                <span className="sec-cut-name">{s.name}</span>
+                <span className="sec-cut-note">Cut · {formatStart(sectionEnd(song, i) - s.start).slice(0, 5)} of music left out</span>
+                <span className="dialog-actions-spacer" />
+                <button className="small" onClick={() => edit(`Put Back “${s.name}”`, () => delete s.skip)}>
+                  Put Back
+                </button>
+              </div>
+            )
+          }
           return (
             <div key={s.id} className="sec-row" role="listitem" style={{ ['--c' as string]: sectionColor(s.name) }}>
               <select
@@ -159,10 +173,12 @@ export function SongSections({
                 ))}
                 <option value={CUSTOM}>Other name…</option>
               </select>
+              {/* As heard: cut sections before it aren't counted. */}
               <StartField
-                value={s.start}
+                value={toHeard(song, s.start)}
                 disabled={i === 0}
-                onCommit={(t) => {
+                onCommit={(heard) => {
+                  const t = toSong(song, heard)
                   if (t <= 0 || t > latest || clash(t, s.id)) return false
                   edit('Move Section', () => {
                     s.start = t
@@ -177,17 +193,12 @@ export function SongSections({
                 </button>
               )}
               <span className="dialog-actions-spacer" />
-              {i > 0 && (
+              {song.sections.filter((x) => !x.skip).length > 1 && (
                 <button
                   className="sec-del"
-                  title={`Delete ${s.name}`}
-                  aria-label={`Delete ${s.name}`}
-                  onClick={() =>
-                    edit(`Delete Section “${s.name}”`, () => {
-                      song.sections.splice(i, 1)
-                      song.sections[0].start = 0
-                    })
-                  }
+                  title={`Cut ${s.name}: leave its music out (Put Back undoes it)`}
+                  aria-label={`Cut ${s.name}`}
+                  onClick={() => edit(`Cut “${s.name}”`, () => (s.skip = true))}
                 >
                   ✕
                 </button>
@@ -197,6 +208,11 @@ export function SongSections({
         })}
       </div>
       <div className="sec-actions">
+        {hasCuts(song) && (
+          <span className="muted sec-length">
+            Plays for {formatStart(playedLength(song)).slice(0, 5)} ({formatStart(song.duration - playedLength(song)).slice(0, 5)} cut)
+          </span>
+        )}
         <button className="small" onClick={() => add()}>
           + Add Section
         </button>

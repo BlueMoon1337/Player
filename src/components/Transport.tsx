@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Engine, EngineState } from '../audio/engine'
+import { playedLength, toHeard } from '../audio/arrangement'
 import { bpmAt, timeSigAt } from '../audio/grid'
 import { type Song, formatTime } from '../audio/types'
 
@@ -39,7 +40,9 @@ function TimeDisplay({ engine, song }: { engine: Engine; song: Song | null }) {
     let raf = 0
     let last = ''
     const loop = () => {
-      const text = bigTime(engine.position)
+      // As heard: cut sections (arrangement.ts) aren't counted.
+      const song = engine.currentSong
+      const text = bigTime(song ? toHeard(song, engine.position) : engine.position)
       if (text !== last && el.current) el.current.textContent = last = text
       raf = requestAnimationFrame(loop)
     }
@@ -51,7 +54,7 @@ function TimeDisplay({ engine, song }: { engine: Engine; song: Song | null }) {
       <span className="t-time-big" ref={el}>
         00:00
       </span>
-      <span className="t-time-small">{song ? `${formatTime(0)} / ${formatTime(song.duration)}` : '–:–– / –:––'}</span>
+      <span className="t-time-small">{song ? `${formatTime(0)} / ${formatTime(playedLength(song))}` : '–:–– / –:––'}</span>
     </div>
   )
 }

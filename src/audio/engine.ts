@@ -1,4 +1,5 @@
 import { BUSES, type BusId, autoPanOutput, busOutput, trackBus } from './routing'
+import { cuts, nextCut, pastCut, songEnd } from './arrangement'
 import { freeMemory, isFoldedStereo } from './decoder'
 import { barBefore, nextBar } from './grid'
 import { type ClickSoundName, renderClick } from './synth'
@@ -900,6 +901,8 @@ export class Engine {
   }
 
   private startSources(offset: number, when: number) {
+    // Starting inside a cut section starts where its music picks up again.
+    if (this.song) offset = pastCut(this.song, offset) ?? offset
     const l = this.loop
     for (const ch of this.channels.values()) {
       if (!ch.buffer) continue
@@ -951,14 +954,16 @@ export class Engine {
     if (this.ctx.state !== 'running') await this.ctx.resume()
     if (request !== this.transportRequest || !this.song || this.playing) return
     if (this.fading !== 'in') this.cancelFade()
-    if (this.pausedPos >= this.song.duration - 0.05) this.pausedPos = 0
+    if (this.pausedPos >= songEnd(this.song) - 0.05) this.pausedPos = 0
     // Song Section Pre-roll: from the start of a section, start a bar early, the click counting
     // in and the tracks fading up to full by the section's downbeat.
     let preroll = 0
     if (this.sectionPreroll && this.pausedPos > 0) {
       const sec = this.song.sections.find((s) => Math.abs(s.start - this.pausedPos) < 0.02)
       const from = sec ? barBefore(this.song, sec.start) : -1
-      if (sec && from >= 0) {
+      // Not when the bar before is cut: that music isn't heard before this section any more.
+      const cutBefore = sec && cuts(this.song).some((c) => c.end > from + 1e-3 && c.start < sec.start - 1e-3)
+      if (sec && from >= 0 && !cutBefore) {
         this.pausedPos = from
         preroll = sec.start - from
       }
@@ -1000,6 +1005,7 @@ export class Engine {
   seek(time: number) {
     if (!this.song) return
     time = Math.max(0, Math.min(time, this.song.duration))
+    time = pastCut(this.song, time) ?? time
     if (this.loop && (time < this.loop.start || time >= this.loop.end)) this.loop = null
     this.pendingJump = null
     if (this.playing) {
@@ -1200,6 +1206,18 @@ export class Engine {
         this.emit()
       }
     }
+    // A cut section coming up: carry on from the end of it at the same instant, as a section jump
+    // does. (Not while a loop holds playback in its section, or a jump is landing.)
+    if (!this.loop && !this.pendingJump && this.ctx.currentTime >= this.startCtxTime) {
+      const at = this.position
+      const cut = nextCut(this.song, at - 0.001)
+      if (cut && cut.start - at < 0.25) {
+        const when = Math.max(this.ctx.currentTime + 0.005, this.startCtxTime + (cut.start - this.startOffset))
+        this.prevBase = { ctxTime: this.startCtxTime, offset: this.startOffset }
+        this.stopSources(when)
+        this.startSources(cut.end, when)
+      }
+    }
     // The hand-off point fires when playback runs across it, not when a seek or jump lands past it.
     const pos = this.position
     const last = this.lastTickPos
@@ -1209,10 +1227,10 @@ export class Engine {
       this.handoffListeners.forEach((fn) => fn())
       return
     }
-    if (!this.loop && this.position >= this.song.duration) {
+    if (!this.loop && this.position >= songEnd(this.song)) {
       this.stopSources()
       this.playing = false
-      this.pausedPos = this.song.duration
+      this.pausedPos = songEnd(this.song)
       this.cancelFade()
       this.sendMidi([0xfc])
       this.emit()

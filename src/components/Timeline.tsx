@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Engine, EngineState, JumpMode, LoopMode } from '../audio/engine'
+import { heardSections, joins, pastCut, playedLength, toHeard, toSong } from '../audio/arrangement'
 import { beatGrid, nearestBar } from '../audio/grid'
 import {
   SECTION_TYPES,
+  type Section,
   type Song,
+  formatTime,
   nextSectionName,
   sectionAbbrev,
   sectionColor,
   sectionEnd,
-  sectionIndexAt,
   uid,
 } from '../audio/types'
 import { UNDO_KEY, showNote } from '../library/history'
@@ -118,7 +120,10 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
   /** Width of the visible part; the song's full width is VISIBLE_SECONDS to this. */
   const [viewW, setViewW] = useState(1000)
   const handScrollUntil = useRef(0)
-  const contentW = song ? Math.max(viewW, Math.round((song.duration / VISIBLE_SECONDS) * viewW)) : viewW
+  // Everything here is drawn as the song is heard: cut sections (arrangement.ts) are left out.
+  const heardLength = song ? playedLength(song) : 0
+  const heard = song ? heardSections(song) : []
+  const contentW = song ? Math.max(viewW, Math.round((heardLength / VISIBLE_SECONDS) * viewW)) : viewW
 
   useEffect(() => {
     const sc = scroller.current
@@ -163,34 +168,32 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
       g.setTransform(dpr, 0, 0, dpr, 0, 0)
       g.clearRect(0, 0, w, h)
       if (!song) return
-      const x = (t: number) => (t / song.duration) * w
+      const length = playedLength(song)
+      const x = (t: number) => (t / length) * w
       if (editing) {
         drawSongMap(g, song, peaks, w, h)
         return
       }
-      song.sections.forEach((s, i) => {
-        const x0 = x(s.start)
-        const x1 = x(sectionEnd(song, i))
+      for (const { section: s, start, end } of heardSections(song)) {
+        const x0 = x(start)
+        const x1 = x(end)
         g.fillStyle = sectionColor(s.name) + '2a'
         g.fillRect(x0, 0, x1 - x0, h)
         g.fillStyle = sectionColor(s.name)
         g.fillRect(x0, 0, 2, h)
-      })
+      }
       if (peaks) {
         const mid = h / 2
-        song.sections.forEach((s, i) => {
-          const x0 = Math.floor(x(s.start))
-          const x1 = Math.ceil(x(sectionEnd(song, i)))
+        for (const { section: s, start, end } of heardSections(song)) {
+          const x0 = Math.floor(x(start))
+          const x1 = Math.ceil(x(end))
           g.fillStyle = sectionColor(s.name) + 'd0'
           for (let px = x0; px < x1; px++) {
-            const b = Math.floor((px / w) * peaks.length)
-            const b2 = Math.max(b + 1, Math.floor(((px + 1) / w) * peaks.length))
-            let v = 0
-            for (let k = b; k < b2 && k < peaks.length; k++) v = Math.max(v, peaks[k])
+            const v = peakAt(song, peaks, px, w)
             const amp = Math.max(0.5, v * (h * 0.42))
             g.fillRect(px, mid - amp, 1, amp * 2)
           }
-        })
+        }
       }
       if (grid) drawGrid(g, song, w, h, 0.16)
     }
@@ -215,17 +218,22 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
       }
       lastDraw = now
       if (song && playhead.current) {
-        const pos = engine.position
-        playhead.current.style.left = `${(pos / song.duration) * 100}%`
+        const pos = toHeard(song, engine.position)
+        const length = playedLength(song)
+        playhead.current.style.left = `${(pos / length) * 100}%`
         const sc = scroller.current
         const width = wrap.current?.offsetWidth ?? 0
         if (sc && width > sc.clientWidth + 1 && performance.now() > handScrollUntil.current) {
-          const x = (pos / song.duration) * width
+          const x = (pos / length) * width
           const inView = x >= sc.scrollLeft && x <= sc.scrollLeft + sc.clientWidth - 24
           if (engine.isPlaying || (!inView && pos !== lastPos)) sc.scrollLeft = x - sc.clientWidth * PLAYHEAD_LEAD
         }
         lastPos = pos
-        const idx = sectionIndexAt(song, pos)
+        // The section playing, among those heard (the labels are of those).
+        let idx = 0
+        heardSections(song).forEach((h, i) => {
+          if (h.start <= pos + 1e-6) idx = i
+        })
         if (idx !== lastIdx && labels.current) {
           labels.current.querySelectorAll('.section-label').forEach((n, i) => n.classList.toggle('current', i === idx))
           lastIdx = idx
@@ -241,7 +249,7 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
 
   const seekFromEvent = (e: React.PointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect()
-    engine.seek(((e.clientX - r.left) / r.width) * song.duration)
+    engine.seek(toSong(song, ((e.clientX - r.left) / r.width) * heardLength))
   }
 
   if (editing && edit) {
@@ -264,9 +272,9 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
           >
             <canvas ref={canvas} />
             <div className="smap-blocks" ref={labels}>
-              {song.sections.map((s, i) => {
-                const left = (s.start / song.duration) * 100
-                const width = ((sectionEnd(song, i) - s.start) / song.duration) * 100
+              {heard.map(({ section: s, index: i, start, end }) => {
+                const left = (start / heardLength) * 100
+                const width = ((end - start) / heardLength) * 100
                 const px = (contentW * width) / 100
                 const looping = state.loop?.sectionId === s.id ? state.loop.mode : null
                 const menu = sectionMenu(song, i, engine, edit, looping)
@@ -294,8 +302,8 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
                     </button>
                     {px >= FULL_CONTROLS_PX ? (
                       <>
-                        {song.sections.length > 1 && (
-                          <button className="smap-btn smap-del" title={`Delete ${s.name}`} onClick={() => deleteSection(song, i, edit)}>
+                        {heard.length > 1 && (
+                          <button className="smap-btn smap-del" title={`Cut ${s.name}: leave its music out`} onClick={() => cutSection(song, i, edit)}>
                             <MinusIcon />
                           </button>
                         )}
@@ -312,6 +320,18 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
                 )
               })}
             </div>
+            {/* Where sections were cut: their music is left out here. Click to put it back. */}
+            {joins(song).map((j) => (
+              <button
+                key={j.sections.map((x) => x.id).join()}
+                className="smap-cut"
+                style={{ left: `${(j.at / heardLength) * 100}%` }}
+                title={`${j.sections.map((x) => x.name).join(', ')} cut here (${formatTime(j.length)}). Click to put it back.`}
+                onClick={() => putBack(j.sections, edit)}
+              >
+                ✂
+              </button>
+            ))}
             <div className="playhead" ref={playhead} />
           </div>
         </div>
@@ -324,9 +344,9 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
       <div className="tl-scroll" ref={scroller} {...scrollProps}>
         <div className="tl-content" style={{ width: contentW }}>
           <div className="section-labels" ref={labels}>
-            {song.sections.map((s, i) => {
-              const left = (s.start / song.duration) * 100
-              const width = ((sectionEnd(song, i) - s.start) / song.duration) * 100
+            {heard.map(({ section: s, index: i, start, end }) => {
+              const left = (start / heardLength) * 100
+              const width = ((end - start) / heardLength) * 100
               const looping = state.loop?.sectionId === s.id ? state.loop.mode : null
               const pending = state.pendingJump?.sectionId === s.id
               return (
@@ -369,8 +389,8 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
               <div
                 className="loop-region"
                 style={{
-                  left: `${(state.loop.start / song.duration) * 100}%`,
-                  width: `${((state.loop.end - state.loop.start) / song.duration) * 100}%`,
+                  left: `${(toHeard(song, state.loop.start) / heardLength) * 100}%`,
+                  width: `${((state.loop.end - state.loop.start) / heardLength) * 100}%`,
                 }}
               />
             )}
@@ -387,13 +407,27 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
 /** Edit mode's look: a pale waveform over bar lines; the section blocks are drawn as elements on top. */
 /** Waveform Grid: a line on every bar, fainter ones on the beats (when they're far enough apart). */
 function drawGrid(g: CanvasRenderingContext2D, song: Song, w: number, h: number, barAlpha: number) {
+  const length = playedLength(song)
   for (const b of beatGrid(song)) {
-    if (b.time < 0) continue
+    // Beats in a cut section aren't heard.
+    if (b.time < 0 || pastCut(song, b.time) !== null) continue
     const isBar = b.index === 0
-    if (!isBar && (b.length / song.duration) * w < 6) continue
+    if (!isBar && (b.length / length) * w < 6) continue
     g.fillStyle = `rgba(255, 255, 255, ${isBar ? barAlpha : barAlpha / 2.5})`
-    g.fillRect(Math.round((b.time / song.duration) * w), 0, 1, h)
+    g.fillRect(Math.round((toHeard(song, b.time) / length) * w), 0, 1, h)
   }
+}
+
+/** The waveform's height at a pixel of the timeline as heard (`w` wide), from the song's own peaks. */
+function peakAt(song: Song, peaks: Float32Array, px: number, w: number): number {
+  const length = playedLength(song)
+  const from = toSong(song, (px / w) * length)
+  const to = from + length / w
+  const b = Math.floor((from / song.duration) * peaks.length)
+  const b2 = Math.max(b + 1, Math.floor((to / song.duration) * peaks.length))
+  let v = 0
+  for (let k = b; k < b2 && k < peaks.length; k++) v = Math.max(v, peaks[k])
+  return v
 }
 
 function drawSongMap(g: CanvasRenderingContext2D, song: Song, peaks: Float32Array | null, w: number, h: number) {
@@ -402,10 +436,7 @@ function drawSongMap(g: CanvasRenderingContext2D, song: Song, peaks: Float32Arra
   const mid = h / 2
   g.fillStyle = 'rgba(228, 228, 231, 0.72)'
   for (let px = 0; px < w; px++) {
-    const b = Math.floor((px / w) * peaks.length)
-    const b2 = Math.max(b + 1, Math.floor(((px + 1) / w) * peaks.length))
-    let v = 0
-    for (let k = b; k < b2 && k < peaks.length; k++) v = Math.max(v, peaks[k])
+    const v = peakAt(song, peaks, px, w)
     const amp = Math.max(0.5, v * (h * 0.36))
     g.fillRect(px, mid - amp, 1, amp * 2)
   }
@@ -450,15 +481,31 @@ function addAtPlayhead(song: Song, engine: Engine, edit: Edit): MenuItem[] {
   return typeItems((t) => insertAt(song, snapToBar(song, engine.position), t, edit))
 }
 
-/** Straight away (like deleting a slide in Lumen), and undoable: its time joins the section before. */
-function deleteSection(song: Song, i: number, edit: Edit) {
+/**
+ * Cuts a section: its music is left out, and the song plays that much shorter. Straight away (like
+ * deleting a slide in Lumen), and undoable; the ✂ where it was puts it back.
+ */
+function cutSection(song: Song, i: number, edit: Edit) {
+  if (song.sections.filter((s) => !s.skip).length < 2) return
+  const s = song.sections[i]
+  edit(`Cut “${s.name}”`, () => (s.skip = true))
+  showNote(`Cut “${s.name}”: the song is ${formatTime(sectionEnd(song, i) - s.start)} shorter. ${UNDO_KEY} undoes this.`, true)
+}
+
+/** Puts cut sections' music back. */
+function putBack(sections: Section[], edit: Edit) {
+  edit(sections.length === 1 ? `Put Back “${sections[0].name}”` : 'Put Back Sections', () => sections.forEach((s) => delete s.skip))
+}
+
+/** Takes the marker out but keeps the music: its time joins the section before. */
+function removeMarker(song: Song, i: number, edit: Edit) {
   if (song.sections.length < 2) return
   const name = song.sections[i].name
-  edit(`Delete Section “${name}”`, () => {
+  edit(`Remove Marker “${name}”`, () => {
     song.sections.splice(i, 1)
     song.sections[0].start = 0
   })
-  showNote(`Deleted the section “${name}”. ${UNDO_KEY} undoes this.`, true)
+  showNote(`Removed the marker “${name}”; its music joins the section before. ${UNDO_KEY} undoes this.`, true)
 }
 
 /** A section's loop button cycles: off → repeat once → repeat until turned off → off. */
@@ -492,7 +539,18 @@ function sectionMenu(song: Song, i: number, engine: Engine, edit: Edit, looping:
         }),
     },
     'separator',
-    { label: 'Delete Section', danger: true, disabled: song.sections.length < 2, onClick: () => deleteSection(song, i, edit) },
+    {
+      label: 'Cut Section (Leave Out Its Music)',
+      danger: true,
+      disabled: song.sections.filter((x) => !x.skip).length < 2,
+      onClick: () => cutSection(song, i, edit),
+    },
+    {
+      // Its time joins the section before, so not when that one is cut (the music would go with it).
+      label: 'Remove Marker Only (Keep the Music)',
+      disabled: song.sections.length < 2 || !!song.sections[i - 1]?.skip || (i === 0 && !!song.sections[1]?.skip),
+      onClick: () => removeMarker(song, i, edit),
+    },
   ]
 }
 

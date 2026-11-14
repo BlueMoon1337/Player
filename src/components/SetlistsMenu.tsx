@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { playedLength } from '../audio/arrangement'
 import { KEYS, type Song, formatTime, keyRoot } from '../audio/types'
 import { desktop } from '../platform'
 import {
@@ -14,6 +15,7 @@ import {
   removeFromSetlist,
   renameSetlist,
   setCurrentSetlist,
+  setlistSections,
   setlistSongs,
   setlistsWith,
   SONG_DRAG,
@@ -149,6 +151,10 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
       : setlistSongs(current, lib)
 
   /** + Add: a menu of the setlists (✓ where the song is already), and a new one. */
+  /** How long a song plays: as arranged in this setlist (cut sections left out), or in full in the library. */
+  const lengthIn = (song: Song) =>
+    view === 'setlist' ? playedLength({ sections: setlistSections(current, song), duration: song.duration }) : song.duration
+
   const addMenu = (e: React.MouseEvent<HTMLButtonElement>, song: Song) => {
     const r = e.currentTarget.getBoundingClientRect()
     showContextMenu({ clientX: r.left, clientY: r.bottom + 4, preventDefault() {} }, [
@@ -342,7 +348,7 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
             ) : (
               <span className="muted sl-sub">
                 {shown.length} song{shown.length === 1 ? '' : 's'} ·{' '}
-                {formatTime(shown.reduce((t, s) => t + s.duration, 0))}
+                {formatTime(shown.reduce((t, s) => t + lengthIn(s), 0))}
               </span>
             )}
             <span className="dialog-actions-spacer" />
@@ -412,7 +418,7 @@ export function SetlistsMenu({ currentSongId, playing, onLoadSong, onImport, onC
                   </span>
                   <span className="sl-key">{song.key}</span>
                   <span className="sl-meta">{Math.round(song.bpm)} BPM</span>
-                  <span className="sl-meta">{formatTime(song.duration)}</span>
+                  <span className="sl-meta">{formatTime(lengthIn(song))}</span>
                   {view === 'library' && (
                     <span className="sl-meta sl-size" title={song.source === 'demo' ? 'Made by Player as it plays: no files' : 'Size of its files'}>
                       {sizeOf(song) !== undefined ? formatBytes(sizeOf(song)!) : '—'}

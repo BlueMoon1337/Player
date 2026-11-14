@@ -5,6 +5,8 @@ export interface Section {
   name: string
   /** Start time in seconds from the top of the song. */
   start: number
+  /** Cut: its music is left out of the arrangement, and the song plays that much shorter (arrangement.ts). */
+  skip?: boolean
 }
 
 export interface Stem {

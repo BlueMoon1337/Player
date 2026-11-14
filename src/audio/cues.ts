@@ -4,6 +4,7 @@
  * spoken by the desktop app (electron/cues.ts); this lays them out in time for a song.
  */
 import type { CueLanguage } from '../settings'
+import { toHeard, toSong } from './arrangement'
 import { barBefore, beatsBefore, meterMap } from './grid'
 import type { Song } from './types'
 
@@ -75,6 +76,7 @@ export function countWords(lang: Lang, beatsPerBar: number): string[] {
 export function songCuePhrases(song: Song, lang: Lang, countIn: boolean): string[] {
   const out = new Set<string>()
   for (const s of song.sections) {
+    if (s.skip) continue
     const p = cuePhrase(s.name, lang)
     if (p) out.add(p)
   }
@@ -113,10 +115,17 @@ export function renderCues(
   const buf = ctx.createBuffer(1, Math.max(1, Math.ceil(song.duration * sr)), sr)
   const data = buf.getChannelData(0)
   for (const s of song.sections) {
+    // A cut section isn't heard, so it isn't announced.
+    if (s.skip) continue
     const phrase = cuePhrase(s.name, lang)
     // The bar before the section, through any tempo or time signature change.
     const beats = beatsBefore(song, s.start)
-    const at = beats.length ? beats[0].time : barBefore(song, s.start)
+    const bar = beats.length ? beats[0].time : barBefore(song, s.start)
+    // As heard: after a cut, the bar before is the end of the music before the cut, so the cue and
+    // count go there (they're placed in the song's own time, which is what plays).
+    const heardAt = toHeard(song, s.start) - (s.start - bar)
+    const at = heardAt < -0.01 ? heardAt : toSong(song, heardAt)
+    const shift = bar - at
     if (!phrase || at < -0.01) continue
     const sample = samples.get(phrase)
     if (sample) place(data, sr, Math.max(0, at), sample)
@@ -124,7 +133,7 @@ export function renderCues(
     const words = countWords(lang, beats.length)
     beats.slice(1).forEach((b, k) => {
       const c = words[k] && samples.get(words[k])
-      if (c) place(data, sr, b.time, c)
+      if (c) place(data, sr, b.time - shift, c)
     })
   }
   return buf

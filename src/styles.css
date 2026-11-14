@@ -2103,6 +2103,26 @@ button.smap-btn:hover {
   padding: 2px 9px;
   font-size: 12px;
 }
+/* Song map: where sections were cut (their music left out). Click to put it back. */
+.smap-cut {
+  position: absolute;
+  top: 6px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  transform: translateX(-50%);
+  border: 1.5px dashed #f87171;
+  border-radius: 50%;
+  background: #2a1414;
+  color: #fca5a5;
+  font-size: 13px;
+}
+.smap-cut:hover {
+  background: #3a1a1a;
+}
 .smap-add-start {
   position: relative;
   align-self: center;
@@ -2297,6 +2317,26 @@ button.smap-btn:hover {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.sec-length {
+  margin-right: auto;
+  font-size: 12px;
+}
+/* A cut section in the list: its music is left out. */
+.sec-row.cut {
+  opacity: 0.75;
+  box-shadow: inset 4px 0 0 #52525b;
+}
+.sec-cut-name {
+  width: 220px;
+  padding: 6px 8px;
+  color: var(--muted);
+  font-size: 14px;
+  text-decoration: line-through;
+}
+.sec-cut-note {
+  color: #fca5a5;
+  font-size: 12px;
 }
 /* Song Settings ▸ Time Changes and Tempo Changes. */
 .song-timing {

@@ -38,6 +38,7 @@ import {
 import { type MenuCommand, desktop } from './platform'
 import { useSettings } from './settings'
 import { renderCues, songCuePhrases } from './audio/cues'
+import { songEnd as heardEnd } from './audio/arrangement'
 import { decodeAudio, freeMemory } from './audio/decoder'
 import { type ExportFormat, type PadRecord, type SongEndSetting, cueUrl, padUrl } from './platform/types'
 import { type LibraryImport, importIntoLibrary, loadSongStems, recordFromSong } from './platform/library'
@@ -621,8 +622,10 @@ export default function App() {
       void ensureStems(next, true).catch(() => {})
     }
     if (end !== 'overlap' && end !== 'crossfade') return void engine.setHandoff(null)
-    const last = song.sections.length > 1 ? song.sections[song.sections.length - 1].start : null
-    engine.setHandoff(last ?? Math.max(0, song.duration - fadeSeconds))
+    // The last section heard (cut sections don't play), or a fade length before the end.
+    const kept = song.sections.filter((s) => !s.skip)
+    const last = kept.length > 1 ? kept[kept.length - 1].start : null
+    engine.setHandoff(last ?? Math.max(0, heardEnd(song) - fadeSeconds))
     return engine.onHandoff(() => {
       if (continuePad) setPadOn(true)
       void selectSong(next.id, { crossfade: end === 'crossfade' ? fadeSeconds : null })
@@ -793,7 +796,8 @@ export default function App() {
       else if (e.key.toLowerCase() === 'f') engine.toggleFade()
       else if (e.key.toLowerCase() === 'l') toggleCurrentLoop(e.shiftKey ? 'once' : 'forever')
       else if (/^[1-9]$/.test(e.key) && cur) {
-        const sec = cur.sections[Number(e.key) - 1]
+        // The sections heard, numbered as the timeline shows them.
+        const sec = cur.sections.filter((s) => !s.skip)[Number(e.key) - 1]
         if (sec) engine.jumpToSection(sec.id, jumpMode)
       } else return
       ;(document.activeElement as HTMLElement | null)?.blur?.()

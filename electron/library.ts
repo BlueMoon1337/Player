@@ -79,7 +79,15 @@ function parseLibraryFile(raw: unknown): LibraryState | null {
           (x): x is Section =>
             !!x && typeof x.id === 'string' && typeof x.name === 'string' && typeof x.start === 'number' && Number.isFinite(x.start),
         )
-        if (list.length === v.length) sections[k] = list.map((x) => ({ id: x.id.slice(0, 64), name: x.name.slice(0, 64), start: Math.max(0, x.start) }))
+        if (list.length === v.length) {
+          sections[k] = list.map((x) => ({
+            id: x.id.slice(0, 64),
+            name: x.name.slice(0, 64),
+            start: Math.max(0, x.start),
+            // Cut from this setlist's arrangement: its music is left out.
+            ...((x as { skip?: unknown }).skip === true ? { skip: true } : {}),
+          }))
+        }
       }
       return { id: s.id as string, name: (s.name as string).slice(0, 80), songs: ids(s.songs), ends, sections }
     })
