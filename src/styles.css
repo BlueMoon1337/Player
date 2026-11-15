@@ -631,6 +631,10 @@ button.small {
   font-weight: 600;
   line-height: 1;
 }
+.btn-solo.btn-reset {
+  font-size: 15px;
+  line-height: 1;
+}
 .btn-solo.on {
   background: #f5c542;
   border-color: #f5c542;

@@ -4,7 +4,7 @@ import { beatAt } from '../audio/grid'
 import { PAD_SOUNDS, type ImportedPad, type PadPlayer } from '../audio/pad'
 import { type BusId, TRACK_BUSES, busName, defaultTrackBus } from '../audio/routing'
 import { type Bus, type ChannelSettings, type Song, busLabel, busOptions, sectionIndexAt } from '../audio/types'
-import { type MenuEntry, showContextMenu } from './Ask'
+import { type MenuEntry, confirmDialog, showContextMenu } from './Ask'
 import { busSettingsLocked } from './RoutingTabs'
 import { getSettings, setSetting, useSettings } from '../settings'
 import { Fader } from './Fader'
@@ -245,7 +245,11 @@ export function Mixer(p: Props) {
   const clickParts = state.channels.filter(
     (c) => c.group === 'click' && c.id !== 'click' && !(state.audioClick && generated.has(c.id)) && (c.id !== 'cues' || state.cues),
   )
-  const stems = state.channels.filter((c) => c.group === 'stem' && (settings.referenceTrack || !c.reference))
+  // With Auto Pan on, the tracks that go to the in-ears (the guide) sit next to the click.
+  const inEar = (c: EngineState['channels'][number]) => state.autoPan && c.output === 'mono:0'
+  const stems = state.channels
+    .filter((c) => c.group === 'stem' && (settings.referenceTrack || !c.reference))
+    .sort((a, b) => Number(inEar(b)) - Number(inEar(a)))
   const empty = <div className="empty">{engine.currentSong ? 'Loading stems…' : 'No song loaded'}</div>
 
   const clickStrip = clickBus && (
@@ -502,7 +506,26 @@ export function Mixer(p: Props) {
         {loopButton('forever', 'Repeat this section until turned off', <LoopForeverIcon />)}
       </div>
       <div className="strip master">
-        <span className="btn-solo placeholder" />
+        {view === 'pad' ? (
+          <span className="btn-solo placeholder" />
+        ) : (
+          <button
+            className="btn-solo btn-reset"
+            title={view === 'buses' ? 'Reset the buses to their default level, for this song' : 'Reset the tracks to their default level, for this song'}
+            aria-label={view === 'buses' ? 'Reset bus volumes' : 'Reset track volumes'}
+            onClick={async () => {
+              const which = view === 'buses' ? 'buses' : 'tracks'
+              const ok = await confirmDialog({
+                title: which === 'buses' ? 'Reset the bus volumes?' : 'Reset the track volumes?',
+                message: `Every ${which === 'buses' ? 'bus' : 'track'} fader${song ? ` in “${song.title}”` : ''} goes back to its default level. Mutes stay as they are.`,
+                confirmLabel: 'Reset',
+              })
+              if (ok) engine.resetVolumes(which)
+            }}
+          >
+            ↺
+          </button>
+        )}
         <div className="master-fader">
           <div className="master-meters">
             <div className="master-meter">

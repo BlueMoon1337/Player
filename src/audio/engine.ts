@@ -647,6 +647,24 @@ export class Engine {
     this.emit()
   }
 
+  /**
+   * Puts the faders back at their default level, mutes left as they are: the loaded song's tracks
+   * and the click's ('tracks', the Mixer), or the buses and the Click bus ('buses').
+   */
+  resetVolumes(which: 'tracks' | 'buses') {
+    if (which === 'tracks') {
+      for (const ch of this.channels.values()) {
+        ch.settings = { ...ch.settings, volume: ch.fromSong && ch.group === 'stem' ? this.defaultVolume : DEFAULT_SETTINGS.volume }
+      }
+    } else {
+      for (const [id, g] of this.groups) this.groups.set(id, { ...g, volume: DEFAULT_SETTINGS.volume })
+      this.clickBus.settings = { ...this.clickBus.settings, volume: DEFAULT_SETTINGS.volume }
+    }
+    this.applyGains()
+    this.saveMix()
+    this.emit()
+  }
+
   /** A bus in the Buses view: its fader, mute and solo apply on top of its stems' own. */
   setGroup(id: BusId, patch: Partial<GroupSettings>) {
     const g = this.groups.get(id)

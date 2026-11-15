@@ -50,7 +50,7 @@ const DEFAULTS: Settings = {
   countIntoSections: false,
   sectionPreroll: false,
   cueLanguage: 'off',
-  songSpecificBuses: false,
+  songSpecificBuses: true,
   referenceTrack: true,
   waveformGrid: true,
   metronomeVU: false,
@@ -64,6 +64,7 @@ const DEFAULTS: Settings = {
 }
 
 const KEY = 'player.prefs.v1'
+const BUSES_PER_SONG_KEY = 'player.prefs.busesPerSong'
 
 function load(): Settings {
   try {
@@ -75,6 +76,13 @@ function load(): Settings {
       // A table of names: only its string entries.
       ;(out as Record<string, unknown>)[k] =
         typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([, x]) => typeof x === 'string')) : v
+    }
+    // Bus levels are kept per song by default (as in Playback): turned on once for settings saved
+    // before that; Settings ▸ General can still turn it off.
+    if (!localStorage.getItem(BUSES_PER_SONG_KEY)) {
+      out.songSpecificBuses = true
+      localStorage.setItem(BUSES_PER_SONG_KEY, '1')
+      localStorage.setItem(KEY, JSON.stringify(out))
     }
     return out
   } catch {
