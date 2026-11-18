@@ -43,7 +43,13 @@ function newer(a, b) {
 function changes(since) {
   if (process.env.UPDATE_NOTES) return process.env.UPDATE_NOTES
   try {
-    const from = since ? git(['log', '-1', '--format=%H', '--grep', `^Version ${since.replace(/\./g, '\\.')}$`, 'HEAD']) : ''
+    // From the previous version's "Version x.y.z" commit (else the one before this version's).
+    const from = since
+      ? git(['log', '-1', '--format=%H', '--grep', `^Version ${since.replace(/\./g, '\\.')}$`, 'HEAD'])
+      : (git(['log', '--format=%H %s', '--grep', '^Version [0-9]', 'HEAD'])
+          .split('\n')
+          .find((l) => l && !l.endsWith(` ${version}`))
+          ?.split(' ')[0] ?? '')
     return git(['log', '--no-merges', '--pretty=- %s', from ? `${from}..HEAD` : '-20', '--', '.', ':!package.json', ':!package-lock.json'])
   } catch {
     return ''
