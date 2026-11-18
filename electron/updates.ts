@@ -1,14 +1,17 @@
-// The Update button: new versions of Player come from the GitHub repository's releases, which a
-// GitHub Actions workflow builds and signs (.github/workflows/release.yml). The repository is
-// private, so Player downloads with a read-only GitHub token pasted in once; it's kept in a file
-// of its own in Player's settings folder and never handed to the page.
+// The Update button: new versions of Player come from the GitHub repository, from two places:
+// - the "updates" branch (npm run publish-package): latest.json and the update package it names,
+//   read from GitHub's public file address. Made and published without a build machine, so it's
+//   where most versions come from.
+// - the repository's releases: whole apps, from the Release workflow (run by hand).
+// Player takes the newest version either offers. The repository is public, so no token is needed;
+// one pasted in (for if it's private again) is kept in a file of its own in Player's settings
+// folder, sent only to GitHub's API and never handed to the page.
 //
-// Each release carries latest.json: the version, its notes, and the files to download, each with
-// its SHA-512 and an Ed25519 signature over both:
+// latest.json gives the version, its notes, and the files to download, each with its SHA-512 and
+// an Ed25519 signature over both:
 // - "interface": an update package (npm run update-package): Player without Electron, the same
-//   for every platform. Made and published without a build machine (npm run publish-package),
-//   so it's what most releases carry. Taken when this copy's Electron fits it.
-// - "platforms": a whole app for each platform, from the Release workflow (run by hand).
+//   for every platform. Taken when this copy's Electron fits it.
+// - "platforms": a whole app for each platform.
 // Player refuses any download whose hash or signature doesn't match the public key below,
 // installs it (keeping this version for Go Back: electron/packages.ts) and restarts.
 
@@ -57,13 +60,18 @@ interface Manifest {
 
 interface Asset {
   name: string
-  /** The API address, which downloads with the token (the browser address doesn't, for a private repository). */
+  /** A release's API address (downloads with the token, if there is one), or the branch's file address. */
   url: string
 }
 
 /** GitHub's API, or a stand-in for trying updates (signatures are checked either way). */
 function api() {
   return (process.env.PLAYER_UPDATE_API || 'https://api.github.com').replace(/\/$/, '')
+}
+
+/** The updates branch's files, or a stand-in. */
+export function feed() {
+  return (process.env.PLAYER_UPDATE_FEED || `https://raw.githubusercontent.com/${REPOSITORY}/updates`).replace(/\/$/, '')
 }
 
 const tokenPath = () => path.join(app.getPath('userData'), 'update-token')
@@ -135,16 +143,17 @@ function request(url: string, headers: Record<string, string>): Promise<GitHubRe
 
 /**
  * Fetches from GitHub, following redirects by hand: release downloads redirect to a storage host,
- * which must not be sent the token.
+ * which must not be sent the token. The token goes only to the API, and only when there is one.
  */
-async function github(url: string, token: string, accept: string): Promise<GitHubResponse> {
+async function github(url: string, token: string | null, accept: string): Promise<GitHubResponse> {
   const origin = new URL(api()).origin
   for (let hops = 0; hops < 5; hops++) {
     const res = await request(url, {
       Accept: accept,
       'User-Agent': 'Player',
       'X-GitHub-Api-Version': '2022-11-28',
-      ...(new URL(url).origin === origin ? { Authorization: `Bearer ${token}` } : {}),
+      'Cache-Control': 'no-cache',
+      ...(token && new URL(url).origin === origin ? { Authorization: `Bearer ${token}` } : {}),
     })
     if ('redirect' in res) {
       url = new URL(res.redirect, url).toString()
@@ -155,80 +164,115 @@ async function github(url: string, token: string, accept: string): Promise<GitHu
   throw new Error('GitHub redirected too many times.')
 }
 
-async function latestRelease(token: string): Promise<{ tag: string; assets: Asset[] }> {
+async function readManifest(res: GitHubResponse): Promise<Manifest> {
+  if (res.status !== 200) throw new Error(`Couldn’t read the update details (${res.status}).`)
+  try {
+    const m = JSON.parse(await readAll(res.body)) as Manifest
+    if (!m?.version) throw new Error()
+    return m
+  } catch {
+    throw new Error('The update details couldn’t be read.')
+  }
+}
+
+/** Where an update can come from: its latest.json, and the address of each file it names. */
+interface Source {
+  manifest: Manifest
+  asset: (file: string) => Asset | null
+  where: string
+}
+
+/** The updates branch (no token: its files are public). */
+async function fromBranch(): Promise<Source> {
+  let res: GitHubResponse
+  try {
+    // A fresh address each time, past GitHub's few minutes of caching.
+    res = await github(`${feed()}/latest.json?t=${Date.now()}`, null, 'application/json')
+  } catch (e) {
+    throw new Error(`Couldn’t reach GitHub: ${(e as Error).message}`)
+  }
+  if (res.status === 404) throw new Error('No update has been published yet.')
+  const manifest = await readManifest(res)
+  return { manifest, asset: (file) => ({ name: file, url: `${feed()}/${encodeURIComponent(file)}` }), where: 'the updates branch' }
+}
+
+/** The latest release (with the token, if there is one). */
+async function fromRelease(token: string | null): Promise<Source> {
   let res: GitHubResponse
   try {
     res = await github(`${api()}/repos/${REPOSITORY}/releases/latest`, token, 'application/vnd.github+json')
   } catch (e) {
     throw new Error(`Couldn’t reach GitHub: ${(e as Error).message}`)
   }
-  if (res.status === 401) {
-    throw new Error('GitHub didn’t accept the token. It may have expired: make a new one and paste it in.')
-  }
-  if (res.status === 403 || res.status === 404) {
-    throw new Error(
-      `No release found. Either none has been published yet, or the token can’t read ${REPOSITORY} (it needs Contents: Read-only on that repository).`,
-    )
-  }
+  if (res.status === 401) throw new Error('GitHub didn’t accept the token. It may have expired: make a new one, or remove it.')
+  if (res.status === 403 || res.status === 404) throw new Error(`No release found for ${REPOSITORY}.`)
   if (res.status !== 200) throw new Error(`GitHub answered with an error (${res.status}). Try again later.`)
   const body = JSON.parse(await readAll(res.body)) as { tag_name: string; assets: Asset[] }
-  return { tag: body.tag_name, assets: body.assets ?? [] }
+  const assets = body.assets ?? []
+  const manifestAsset = assets.find((a) => a.name === 'latest.json')
+  if (!manifestAsset) throw new Error(`${body.tag_name} has no update files yet. It may still be building: try again in a few minutes.`)
+  const manifest = await readManifest(await github(manifestAsset.url, token, 'application/octet-stream'))
+  return { manifest, asset: (file) => assets.find((a) => a.name === file) ?? null, where: body.tag_name }
+}
+
+type Route = 'interface' | 'app'
+
+/** What this copy would install from a manifest: the update package when it fits (an AppImage is replaced whole), else the whole app. */
+function routeFor(m: Manifest): { route: Route; entry: PlatformEntry } | { why: string } {
+  const full = m.platforms?.[process.platform]
+  const pkg = m.interface
+  if (pkg?.file && pkg.sha512 && pkg.signature && packages.blocker() === null && shellFits(pkg.electron)) return { route: 'interface', entry: pkg }
+  if (full?.file && full.sha512 && full.signature) return { route: 'app', entry: full }
+  return {
+    why:
+      pkg && !shellFits(pkg.electron)
+        ? `Player ${m.version} needs a newer Player app than this one: download the whole app once from ${REPOSITORY}'s releases.`
+        : `Player ${m.version} has no download for this computer.`,
+  }
 }
 
 /** The update found by the last check, ready to install. */
-let pending: { found: Found; entry: PlatformEntry; asset: Asset; route: 'interface' | 'app' } | null = null
+let pending: { found: Found; entry: PlatformEntry; asset: Asset; route: Route } | null = null
 
-/** Looks for a newer version. Returns it, or null when Player is up to date. */
+/** Looks for a newer version on the updates branch and in the releases. Returns it, or null when Player is up to date. */
 export async function check(): Promise<Found | null> {
   const token = readToken()
-  if (!token) throw new Error('Add a GitHub token first.')
-  const release = await latestRelease(token)
-  const manifestAsset = release.assets.find((a) => a.name === 'latest.json')
-  if (!manifestAsset) {
-    throw new Error(`${release.tag} has no update files yet. It may still be building: try again in a few minutes.`)
-  }
-  const res = await github(manifestAsset.url, token, 'application/octet-stream')
-  if (res.status !== 200) throw new Error(`Couldn’t read the update details (${res.status}).`)
-  let manifest: Manifest
-  try {
-    manifest = JSON.parse(await readAll(res.body))
-  } catch {
-    throw new Error('The update details couldn’t be read.')
-  }
   const current = app.getVersion()
   pending = null
-  if (!manifest?.version || !newer(manifest.version, current)) return null
-  // The update package when it fits this copy (an AppImage is replaced whole), else the whole app.
-  const full = manifest.platforms?.[process.platform]
-  const pkg = manifest.interface
-  const route: 'interface' | 'app' | null =
-    pkg?.file && pkg.sha512 && pkg.signature && packages.blocker() === null && shellFits(pkg.electron)
-      ? 'interface'
-      : full?.file && full.sha512 && full.signature
-        ? 'app'
-        : null
-  if (!route) {
-    throw new Error(
-      pkg && !shellFits(pkg.electron)
-        ? `Player ${manifest.version} needs a newer Player app than this one: download the whole app once from ${REPOSITORY}'s releases.`
-        : `Player ${manifest.version} has no download for this computer.`,
-    )
+  const tried = await Promise.allSettled([fromBranch(), fromRelease(token)])
+  const sources = tried.flatMap((t) => (t.status === 'fulfilled' ? [t.value] : []))
+  if (!sources.length) throw (tried[0] as PromiseRejectedResult).reason
+  // Newest first; for the same version, the branch (its package is the smaller download).
+  const offers = sources
+    .filter((s) => newer(s.manifest.version, current))
+    .sort((a, b) => (newer(b.manifest.version, a.manifest.version) ? 1 : newer(a.manifest.version, b.manifest.version) ? -1 : 0))
+  let why: string | null = null
+  for (const s of offers) {
+    const r = routeFor(s.manifest)
+    if ('why' in r) {
+      why ??= r.why
+      continue
+    }
+    const asset = s.asset(r.entry.file)
+    if (!asset) {
+      why ??= `${s.where} is missing ${r.entry.file}.`
+      continue
+    }
+    const found: Found = {
+      version: s.manifest.version,
+      current,
+      notes: s.manifest.notes?.trim() || null,
+      date: s.manifest.date ? s.manifest.date.slice(0, 10) : null,
+    }
+    pending = { found, entry: r.entry, asset, route: r.route }
+    return found
   }
-  const entry = (route === 'interface' ? pkg : full)!
-  const asset = release.assets.find((a) => a.name === entry.file)
-  if (!asset) throw new Error(`${release.tag} is missing ${entry.file}.`)
-  const found: Found = {
-    version: manifest.version,
-    current,
-    notes: manifest.notes?.trim() || null,
-    date: manifest.date ? manifest.date.slice(0, 10) : null,
-  }
-  pending = { found, entry, asset, route }
-  return found
+  if (why) throw new Error(why)
+  return null
 }
 
 /** Downloads to the updates folder, hashing as it goes. */
-async function download(asset: Asset, token: string, file: string, onProgress: (received: number, total: number | null) => void) {
+async function download(asset: Asset, token: string | null, file: string, onProgress: (received: number, total: number | null) => void) {
   const res = await github(asset.url, token, 'application/octet-stream')
   if (res.status !== 200) throw new Error(`Couldn’t download the update (${res.status}).`)
   const total = Number(res.headers['content-length']) || null
@@ -265,7 +309,6 @@ export async function install(win: BrowserWindow | null, beforeRestart: () => vo
   if (why === 'development') throw new Error('Updates install only in the packaged app.')
   if (why === 'not-appimage') throw new Error('Updates install only into the AppImage build on Linux.')
   const token = readToken()
-  if (!token) throw new Error('Add a GitHub token first.')
   const { found, entry, asset, route } = pending
 
   const dir = path.join(app.getPath('userData'), 'updates')

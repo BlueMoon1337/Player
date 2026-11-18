@@ -146,8 +146,8 @@ Set `PLAYER_LIBRARY_DIR` to use a different library folder, for example for test
 
 The desktop app's **Update** button installs new versions of Player without building anything. It's at the top of **Settings** (⋮), and also in **Player ▸ Check for Updates…** on a Mac and **Help ▸ Check for Updates…** elsewhere.
 
-1. The first time, it asks for a GitHub token, because the repository is private. Make a [fine-grained token](https://github.com/settings/personal-access-tokens/new) with access to **Only select repositories ▸ Player** and **Contents: Read-only**, and paste it in. Player keeps it in a file in its settings folder, on this computer only.
-2. Player looks for a newer release about 15 seconds after it starts, and every six hours. When there is one, the **Settings** button gets a yellow dot, and Settings says which version is ready.
+1. Updates come from the repository's `updates` branch (`latest.json` and a signed update package) and from its releases (whole apps); Player takes the newest. The repository is public, so no token is needed. If it's made private again, add a [fine-grained token](https://github.com/settings/personal-access-tokens/new) with access to **Only select repositories ▸ Player** and **Contents: Read-only** under **Add a GitHub Token…** in the Update window; Player keeps it in a file in its settings folder, on this computer only, and sends it only to GitHub's API.
+2. Player looks for a newer version about 15 seconds after it starts, and every six hours. When there is one, the **Settings** button gets a yellow dot, and Settings says which version is ready.
 3. Open the Update window to see what's new, then click **Install and Restart**. Player:
    1. downloads the new version: an update package (everything but Electron, under 1 MB) when the release has one and it fits this copy, otherwise the whole app
    2. checks its signature
@@ -166,14 +166,14 @@ The desktop app's **Update** button installs new versions of Player without buil
 **Publishing a release without GitHub Actions** (the usual way: no build minutes):
 
 ```sh
-npm version minor --no-git-tag-version        # or set "version" in package.json
+npm version minor --no-git-tag-version        # or set "version" in package.json; commit and push it
 UPDATE_SIGNING_KEY="$(cat update-key.private.pem)" npm run update-package   # → release/Player-<version>-update.zip
-GITHUB_TOKEN=… npm run publish-package        # optional: a GitHub release the Update button finds
+npm run publish-package                        # commits it to the updates branch and pushes it
 ```
 
-`update-package` builds Player and packs everything but Electron (`dist/`, `dist-electron/`, `package.json`) into `app.asar`, with `player-update.json` (version, Electron version, SHA-512, signature), a README and `install-on-mac.sh`. The zip can simply be sent and installed with **Install from Zip…**. `publish-package` makes the GitHub release `v<version>` through GitHub's API with the zip and a `latest.json` whose `interface` entry the Update button installs; its token needs **Contents: Read and write**. A package is refused by a copy of Player with a different major Electron version: then the whole app is needed.
+`update-package` builds Player and packs everything but Electron (`dist/`, `dist-electron/`, `package.json`) into `app.asar`, with `player-update.json` (version, Electron version, SHA-512, signature), a README and `install-on-mac.sh`. `publish-package` puts the zip and `latest.json` on the `updates` branch (older zips stay in its history), where every copy of Player finds it within six hours, or at once with **Check Now**. The zip can also simply be sent and installed with **Install from Zip…**. `publish-package -- --release` makes a GitHub release through the API instead (needs `GITHUB_TOKEN` with **Contents: Read and write**). A package is refused by a copy of Player with a different major Electron version: then the whole app is needed.
 
-Player 1.3.0 and earlier have no Install from Zip. On a Mac, unzip the package and run `bash ~/Downloads/Player-<version>-update/install-on-mac.sh` in Terminal once: it quits Player, keeps the installed version for Go Back, swaps in the new `app.asar`, updates `Info.plist`, signs the app again and opens it. On Windows, install the whole app once.
+Player 1.4.0 reads only releases, so it needs the 1.4.1 zip installed by hand once (Install from Zip…). Player 1.3.0 and earlier have no Install from Zip. On a Mac, unzip the package and run `bash ~/Downloads/Player-<version>-update/install-on-mac.sh` in Terminal once: it quits Player, keeps the installed version for Go Back, swaps in the new `app.asar`, updates `Info.plist`, signs the app again and opens it. On Windows, install the whole app once.
 
 **Publishing whole apps** (when Electron or the packaging changes). The **Release** GitHub Actions workflow (`.github/workflows/release.yml`) builds Player for macOS (one app for Apple silicon and Intel), Windows and Linux. It runs only by hand, because it uses Actions minutes:
 

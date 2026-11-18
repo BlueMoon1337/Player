@@ -60,7 +60,7 @@ const BLOCKER_TEXT: Record<string, string> = {
 }
 
 /** Pasting the read-only GitHub token Player downloads updates with. */
-function TokenForm({ onDone, replacing }: { onDone?: () => void; replacing: boolean }) {
+function TokenForm({ onDone, hasToken }: { onDone?: () => void; hasToken: boolean | null }) {
   const [token, setToken] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -77,12 +77,10 @@ function TokenForm({ onDone, replacing }: { onDone?: () => void; replacing: bool
           .finally(() => setSaving(false))
       }}
     >
-      {!replacing && (
-        <p>
-          New versions of Player come from <b>{REPOSITORY_NAME}</b> on GitHub. The repository is private, so Player needs a read-only
-          token to download them. Make one once:
-        </p>
-      )}
+      <p>
+        Player gets updates from <b>{REPOSITORY_NAME}</b> on GitHub. The repository is public, so no token is needed. If it’s made private
+        again, Player needs a read-only token to download updates. To make one:
+      </p>
       <ol className="update-steps">
         <li>
           Open{' '}
@@ -114,6 +112,28 @@ function TokenForm({ onDone, replacing }: { onDone?: () => void; replacing: bool
         />
         <button type="submit" className="primary" disabled={!token.trim() || saving}>
           {saving ? 'Checking…' : 'Save'}
+        </button>
+      </div>
+      <div className="update-token-row">
+        {hasToken && (
+          <button
+            type="button"
+            className="link"
+            disabled={saving}
+            onClick={() => {
+              setSaving(true)
+              saveToken('')
+                .then(() => onDone?.())
+                .catch((err: Error) => setError(err.message))
+                .finally(() => setSaving(false))
+            }}
+          >
+            Remove Token
+          </button>
+        )}
+        <span className="dialog-actions-spacer" />
+        <button type="button" className="small" onClick={() => onDone?.()}>
+          Done
         </button>
       </div>
       {error && <p className="update-error">{error}</p>}
@@ -290,8 +310,8 @@ export function UpdateDialog({ onClose, playing }: { onClose: () => void; playin
           <span className="update-app">Player</span>
           <span className="muted">Version {u.version ?? '…'}</span>
         </div>
-        {u.hasToken === false || replacing ? (
-          <TokenForm replacing={replacing} onDone={() => setReplacing(false)} />
+        {replacing ? (
+          <TokenForm hasToken={u.hasToken} onDone={() => setReplacing(false)} />
         ) : (
           <>
             {u.status === 'checking' && <p className="update-status">Checking for updates…</p>}
@@ -332,7 +352,7 @@ export function UpdateDialog({ onClose, playing }: { onClose: () => void; playin
             )}
             <div className="dialog-actions">
               <button className="link" disabled={busy} onClick={() => setReplacing(true)}>
-                Change Token…
+                {u.hasToken ? 'GitHub Token…' : 'Add a GitHub Token…'}
               </button>
               <span className="dialog-actions-spacer" />
               {u.status === 'available' || u.status === 'installing' ? (
