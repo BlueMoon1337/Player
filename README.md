@@ -14,7 +14,7 @@ A multitrack backing-track player for live worship and band use, in the spirit o
   - Playback keeps full timing when the window is in the background.
   - Only one copy of the app can run at a time.
   - The window size and position are remembered.
-- **Update button.** Player checks GitHub for new releases and installs signed updates itself (see [Updates](#updates)).
+- **Update button.** Player checks GitHub for new releases and installs signed updates itself, or installs an update package from a zip, and can go back to the version before (see [Updates](#updates)).
 - **Export Player.** File ▸ Export Player (or Settings ▸ About) saves a copy of the installed app to take to another computer without going online: on a Mac a disk image (Player.app with an Applications shortcut, made with `hdiutil`) or a zip (made with `ditto`, keeping the app's links, permissions and signature); on Windows a zip of the installed Player folder, to unzip anywhere and run `Player.exe`; on Linux the AppImage itself or a zip of it. Songs aren't included: they stay in the library folder.
 - **Native menus.** File ▸ Import Stems… (⌘/Ctrl+I), Edit (Undo and Redo, named after the step), Transport, View (Setlists & Library ⌘/Ctrl+L, setlist row, edit mode, outputs, pad, full screen) and Settings (⌘/Ctrl+,).
 
@@ -149,20 +149,36 @@ The desktop app's **Update** button installs new versions of Player without buil
 1. The first time, it asks for a GitHub token, because the repository is private. Make a [fine-grained token](https://github.com/settings/personal-access-tokens/new) with access to **Only select repositories ▸ Player** and **Contents: Read-only**, and paste it in. Player keeps it in a file in its settings folder, on this computer only.
 2. Player looks for a newer release about 15 seconds after it starts, and every six hours. When there is one, the **Settings** button gets a yellow dot, and Settings says which version is ready.
 3. Open the Update window to see what's new, then click **Install and Restart**. Player:
-   1. downloads the new version
+   1. downloads the new version: an update package (everything but Electron, under 1 MB) when the release has one and it fits this copy, otherwise the whole app
    2. checks its signature
-   3. replaces itself:
+   3. keeps the version it replaces, for **Go Back**
+   4. replaces itself:
+      - **an update package:** swaps in the new `app.asar` (on a Mac it also records its fingerprint in `Info.plist` and signs the app again, ad hoc, as the release build does)
       - **macOS:** swaps in the new `Player.app`
       - **Windows:** runs the new installer silently
       - **Linux:** replaces the AppImage
-   4. starts again
+   5. starts again, and says how it went
 
    Your songs, setlist and settings are kept.
 
-**Publishing a release.** The **Release** GitHub Actions workflow (`.github/workflows/release.yml`) builds Player for macOS (one app for Apple silicon and Intel), Windows and Linux:
+**From a zip, and Go Back.** The Update window's **From a Zip** part installs a package without GitHub: **Install from Zip…** takes a `Player-<version>-update.zip` (or a release's Mac zip, or on Windows a zip holding the installer). It says whether the package is signed with Player's release key; an unsigned, older or same-version one installs only with **Install Anyway**. **Previous Version ▸ Go Back** puts back the version kept from before the last update (and keeps the one it leaves, so you can come back). An AppImage can't take packages; it's updated whole.
 
-1. Raise `version` in `package.json`. Player only offers a release newer than itself.
-2. Push that to `main`. The workflow starts by itself when that version hasn't been released yet. Pushing a tag such as `v0.3.0`, or **Actions ▸ Release ▸ Run workflow** on GitHub, also starts it.
+**Publishing a release without GitHub Actions** (the usual way: no build minutes):
+
+```sh
+npm version minor --no-git-tag-version        # or set "version" in package.json
+UPDATE_SIGNING_KEY="$(cat update-key.private.pem)" npm run update-package   # → release/Player-<version>-update.zip
+GITHUB_TOKEN=… npm run publish-package        # optional: a GitHub release the Update button finds
+```
+
+`update-package` builds Player and packs everything but Electron (`dist/`, `dist-electron/`, `package.json`) into `app.asar`, with `player-update.json` (version, Electron version, SHA-512, signature), a README and `install-on-mac.sh`. The zip can simply be sent and installed with **Install from Zip…**. `publish-package` makes the GitHub release `v<version>` through GitHub's API with the zip and a `latest.json` whose `interface` entry the Update button installs; its token needs **Contents: Read and write**. A package is refused by a copy of Player with a different major Electron version: then the whole app is needed.
+
+Player 1.3.0 and earlier have no Install from Zip. On a Mac, unzip the package and run `bash ~/Downloads/Player-<version>-update/install-on-mac.sh` in Terminal once: it quits Player, keeps the installed version for Go Back, swaps in the new `app.asar`, updates `Info.plist`, signs the app again and opens it. On Windows, install the whole app once.
+
+**Publishing whole apps** (when Electron or the packaging changes). The **Release** GitHub Actions workflow (`.github/workflows/release.yml`) builds Player for macOS (one app for Apple silicon and Intel), Windows and Linux. It runs only by hand, because it uses Actions minutes:
+
+1. Raise `version` in `package.json` and push it. Player only offers a release newer than itself.
+2. On GitHub, **Actions ▸ Release ▸ Run workflow**.
 3. The workflow then:
    1. makes a draft release, whose notes are the commits since the last one
    2. builds and signs the three apps into it

@@ -1,11 +1,13 @@
 /**
  * Updates (the desktop app): Player looks for a newer release on GitHub when it starts and every
  * few hours, puts a dot on the Settings button when there is one, and installs it when asked.
+ * It also installs update packages from a zip (no GitHub needed) and goes back to the version
+ * kept from before the last update.
  * The work is in electron/updates.ts; this keeps what the button and its window show.
  */
 import { useSyncExternalStore } from 'react'
 import { desktop } from '.'
-import type { FoundUpdate } from './types'
+import type { FoundUpdate, PackageInfo, PreviousVersion, UpdateResult } from './types'
 
 /** Where releases come from (electron/updates.ts reads the same repository). */
 export const REPOSITORY_NAME = 'BlueMoon1337/Player'
@@ -23,6 +25,16 @@ export interface UpdateState {
   checkedAt: number | null
   /** Why updates can't install here ('translocated', 'development', 'not-appimage'), if they can't. */
   blocker: string | null
+  /** Why update packages can't install here ('translocated', 'development', 'appimage'), if they can't. */
+  packageBlocker: string | null
+  /** The zip package picked (Install from Zip…), checked but not installed yet. */
+  pkg: PackageInfo | null
+  /** The version kept from before the last update (Go Back). */
+  previous: PreviousVersion | null
+  /** How the last update or Go Back went, shown once after the restart. */
+  result: UpdateResult | null
+  /** Restarting into a package or the previous version. */
+  restarting: 'package' | 'revert' | null
 }
 
 let state: UpdateState = {
@@ -34,6 +46,11 @@ let state: UpdateState = {
   progress: null,
   checkedAt: null,
   blocker: null,
+  packageBlocker: null,
+  pkg: null,
+  previous: null,
+  result: null,
+  restarting: null,
 }
 const listeners = new Set<() => void>()
 
@@ -100,13 +117,58 @@ export async function installUpdate(): Promise<void> {
   }
 }
 
+/** Opens a .zip update package and checks it; installing waits for installPackage(). */
+export async function pickPackage(): Promise<void> {
+  if (!desktop) return
+  try {
+    const pkg = await desktop.updates.pickPackage()
+    if (pkg) set({ pkg })
+  } catch (e) {
+    set({ pkg: null })
+    throw new Error(message(e))
+  }
+}
+
+export async function discardPackage(): Promise<void> {
+  set({ pkg: null })
+  await desktop?.updates.discardPackage()
+}
+
+/** Installs the package picked; Player restarts, so this only returns on failure. */
+export async function installPackage(): Promise<void> {
+  if (!desktop || !state.pkg) return
+  set({ restarting: 'package' })
+  try {
+    await desktop.updates.installPackage()
+  } catch (e) {
+    set({ restarting: null })
+    throw new Error(message(e))
+  }
+}
+
+/** Puts the previous version back; Player restarts, so this only returns on failure. */
+export async function revertUpdate(): Promise<void> {
+  if (!desktop || !state.previous) return
+  set({ restarting: 'revert' })
+  try {
+    await desktop.updates.revert()
+  } catch (e) {
+    set({ restarting: null })
+    throw new Error(message(e))
+  }
+}
+
+export const dismissResult = () => set({ result: null })
+
 /** Reads the version and whether there's a token, then checks soon after start-up and every few hours. */
 export function startUpdateChecks(): () => void {
   if (!desktop) return () => {}
   let alive = true
-  void desktop.updates.info().then(({ version, hasToken, blocker }) => {
-    if (alive) set({ version, hasToken, blocker })
+  void desktop.updates.info().then(({ version, hasToken, blocker, packageBlocker }) => {
+    if (alive) set({ version, hasToken, blocker, packageBlocker })
   })
+  void desktop.updates.previous().then((previous) => alive && set({ previous }))
+  void desktop.updates.takeResult().then((result) => alive && result && set({ result }))
   const first = window.setTimeout(() => void checkForUpdates({ quiet: true }), 15_000)
   const every = window.setInterval(() => void checkForUpdates({ quiet: true }), CHECK_EVERY_MS)
   return () => {

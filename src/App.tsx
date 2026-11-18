@@ -5,7 +5,7 @@ import { type ImportedPad, PAD_SOUNDS, PadPlayer } from './audio/pad'
 import { computePeaks } from './audio/peaks'
 import { renderDemoStems } from './audio/synth'
 import { type Song, keyRoot, sectionIndexAt } from './audio/types'
-import { AskHost, ContextMenuHost, confirmDelete, isAsking } from './components/Ask'
+import { AskHost, ContextMenuHost, alertDialog, confirmDelete, isAsking } from './components/Ask'
 import { type LowerView, Mixer } from './components/Mixer'
 import { SongSettingsDialog, type SongTab } from './components/Panels'
 import { SettingsDialog, type SettingsTab } from './components/SettingsDialog'
@@ -44,7 +44,7 @@ import { type ExportFormat, type PadRecord, type SongEndSetting, cueUrl, padUrl 
 import { type LibraryImport, importIntoLibrary, loadSongStems, recordFromSong } from './platform/library'
 import { PAD_FILE, keyFromFileName, padNameFromFiles } from './import/pads'
 import { readZipPad, readZipSong } from './import/webZip'
-import { checkForUpdates, startUpdateChecks, useUpdates } from './platform/updates'
+import { checkForUpdates, dismissResult, startUpdateChecks, useUpdates } from './platform/updates'
 
 // One audio graph for the lifetime of the page.
 const engine = new Engine()
@@ -365,6 +365,24 @@ export default function App() {
 
   // Desktop: look for a newer Player soon after start-up and every few hours.
   useEffect(() => startUpdateChecks(), [])
+  // After an update or Go Back restarted Player: how it went, once.
+  useEffect(() => {
+    const r = updates.result
+    if (!r) return
+    dismissResult()
+    const what = r.action === 'revert' ? 'Going back' : 'The update'
+    void alertDialog(
+      r.ok
+        ? {
+            title: r.action === 'revert' ? `Went back to Player ${r.version}` : `Updated to Player ${r.version}`,
+            message:
+              r.action === 'revert'
+                ? 'The version you went back from is kept: Settings ▸ Update… can return to it.'
+                : 'The version before is kept: Settings ▸ Update… ▸ Go Back returns to it.',
+          }
+        : { title: `${what} didn’t work`, message: `${r.message} Player is still ${updates.version ?? 'the version it was'}.` },
+    )
+  }, [updates.result, updates.version])
 
   // Load the library (from the library folder on desktop) and its setlists.
   useEffect(() => {

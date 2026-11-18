@@ -21,6 +21,7 @@ import { pathToFileURL } from 'node:url'
 import type { LibraryState, MenuCommand, MenuState, SongRecord } from '../src/platform/types'
 import { Library, assertFileName, assertId } from './library'
 import * as updates from './updates'
+import * as packages from './packages'
 import { AUDIO_EXTENSIONS, importPaths } from './importer'
 import { importPads } from './pads'
 import { CUE_LANGUAGES, type CueLanguage, cleanPhrase, renderCues } from './cues'
@@ -508,16 +509,37 @@ function registerIpc() {
     if (lastExport) shell.showItemInFolder(lastExport)
   })
 
-  handle('updates:info', () => ({ version: app.getVersion(), hasToken: updates.hasToken(), blocker: updates.blocker() }))
+  // Restarting into another version isn't the kind of quit the "still playing?" guard is for.
+  const beforeRestart = () => {
+    quitConfirmed = true
+    setActive(false)
+  }
+  handle('updates:info', () => ({
+    version: app.getVersion(),
+    hasToken: updates.hasToken(),
+    blocker: updates.blocker(),
+    packageBlocker: packages.blocker(),
+  }))
   handle('updates:set-token', (token: unknown) => updates.setToken(token))
   handle('updates:check', () => updates.check())
-  handle('updates:install', () =>
-    updates.install(win, () => {
-      // Restarting into the new version isn't the kind of quit the "still playing?" guard is for.
-      quitConfirmed = true
-      setActive(false)
-    }),
-  )
+  handle('updates:install', () => updates.install(win, beforeRestart))
+  // Update packages (zips), and the version kept from before the last update.
+  handle('updates:pick-package', async () => {
+    const opts: Electron.OpenDialogOptions = {
+      title: 'Install an Update Package',
+      buttonLabel: 'Open',
+      properties: ['openFile'],
+      filters: [{ name: 'Player update package', extensions: ['zip'] }],
+    }
+    const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    if (r.canceled || !r.filePaths[0]) return null
+    return packages.inspect(r.filePaths[0])
+  })
+  handle('updates:discard-package', () => packages.discard())
+  handle('updates:install-package', () => packages.install(beforeRestart))
+  handle('updates:previous', () => packages.previous())
+  handle('updates:revert', () => packages.revert(beforeRestart))
+  handle('updates:take-result', () => packages.takeResult())
 
 
   handle('library:reveal', async (id?: unknown) => {

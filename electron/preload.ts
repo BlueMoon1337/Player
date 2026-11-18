@@ -57,6 +57,12 @@ const api: DesktopAPI = {
         ipcRenderer.removeListener('updates:progress', listener)
       }
     },
+    pickPackage: () => ipcRenderer.invoke('updates:pick-package'),
+    discardPackage: () => ipcRenderer.invoke('updates:discard-package'),
+    installPackage: () => ipcRenderer.invoke('updates:install-package'),
+    previous: () => ipcRenderer.invoke('updates:previous'),
+    revert: () => ipcRenderer.invoke('updates:revert'),
+    takeResult: () => ipcRenderer.invoke('updates:take-result'),
   },
   onMenu: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, cmd: MenuCommand) => cb(cmd)

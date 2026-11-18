@@ -1368,6 +1368,53 @@ button.link {
 .update-progress progress {
   width: 100%;
 }
+.update-packages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.update-packages h4 {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+.update-packages .hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.update-package-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.update-package {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+.update-package-file {
+  font-size: 12px;
+  word-break: break-all;
+}
+.update-ok {
+  color: var(--ok);
+}
+.update-warn {
+  color: var(--solo);
+}
+.update-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
 /* ------------------------------------------------------- setlists & library */
 

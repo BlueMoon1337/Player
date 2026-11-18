@@ -147,6 +147,37 @@ export interface UpdateInfo {
   hasToken: boolean
   /** Why updates can't install here: 'translocated' | 'development' | 'not-appimage'. */
   blocker: string | null
+  /** Why update packages can't install here: 'translocated' | 'development' | 'appimage'. */
+  packageBlocker: string | null
+}
+
+/** A zip update package, looked at but not yet installed (electron/packages.ts). */
+export interface PackageInfo {
+  /** interface: a new app.asar (all of Player but Electron); app: a whole Player.app; installer: Windows. */
+  kind: 'interface' | 'app' | 'installer'
+  version: string
+  current: string
+  /** Signed with Player's release key. */
+  signed: boolean
+  /** How it compares with the version running now. */
+  compared: 'newer' | 'same' | 'older'
+  notes: string | null
+  file: string
+}
+
+/** The version kept from before the last update, to go back to. */
+export interface PreviousVersion {
+  version: string
+  kind: 'interface' | 'bundle' | 'dir'
+  savedAt: number
+}
+
+/** How the last update or Go Back went, told once after the restart. */
+export interface UpdateResult {
+  ok: boolean
+  action: 'update' | 'revert'
+  version: string
+  message: string
 }
 
 export interface FoundUpdate {
@@ -215,6 +246,18 @@ export interface DesktopAPI {
     /** Downloads, verifies, installs and restarts; only returns (by throwing) on failure. */
     install(): Promise<void>
     onProgress(cb: (p: { received: number; total: number | null }) => void): () => void
+    /** Asks for a .zip update package and checks it; null if the dialog was cancelled. */
+    pickPackage(): Promise<PackageInfo | null>
+    /** Forgets the package picked. */
+    discardPackage(): Promise<void>
+    /** Installs the package picked and restarts; only returns (by throwing) on failure. */
+    installPackage(): Promise<void>
+    /** The version kept from before the last update, if any. */
+    previous(): Promise<PreviousVersion | null>
+    /** Puts the previous version back and restarts; only returns (by throwing) on failure. */
+    revert(): Promise<void>
+    /** How the last update or Go Back went, once, after the restart. */
+    takeResult(): Promise<UpdateResult | null>
   }
   onMenu(cb: (cmd: MenuCommand) => void): () => void
 }

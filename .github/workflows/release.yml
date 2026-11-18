@@ -1,10 +1,11 @@
 # Builds Player for macOS (one app for Apple silicon and Intel), Windows and Linux, signs the
 # update files, and publishes them as a GitHub release that Player's Update button installs from.
 #
-# Runs by itself when a push to main changes package.json (or this file) and its version hasn't
-# been released yet; also when a version tag (v0.3.0) is pushed, or by hand from the Actions tab
-# ("Run workflow"). To release, raise "version" in package.json: Player only offers a release
-# newer than itself, and a published version can't be reused.
+# Runs only by hand, from the Actions tab ("Run workflow"), because it uses GitHub Actions
+# minutes. Most releases don't need it: an update package (npm run update-package, then
+# npm run publish-package) carries everything but Electron itself and is made without a build
+# machine. Run this when Electron or the packaging changes (electron-builder.yml, new native files).
+# Raise "version" in package.json first: Player only offers a release newer than itself.
 #
 # The release is made as a draft, the builds are added to it, and it's published last with
 # latest.json, so the Update button never sees a half-finished release.
@@ -15,10 +16,6 @@
 name: Release
 
 on:
-  push:
-    branches: [main]
-    paths: [package.json, .github/workflows/release.yml]
-    tags: ['v*']
   workflow_dispatch:
 
 # One release at a time.

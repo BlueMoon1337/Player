@@ -3,9 +3,14 @@
 // private, so Player downloads with a read-only GitHub token pasted in once; it's kept in a file
 // of its own in Player's settings folder and never handed to the page.
 //
-// Each release carries latest.json: the version, its notes, and for each platform the file to
-// download, its SHA-512 and an Ed25519 signature over both. Player refuses any download whose
-// hash or signature doesn't match the public key below, installs it and restarts.
+// Each release carries latest.json: the version, its notes, and the files to download, each with
+// its SHA-512 and an Ed25519 signature over both:
+// - "interface": an update package (npm run update-package): Player without Electron, the same
+//   for every platform. Made and published without a build machine (npm run publish-package),
+//   so it's what most releases carry. Taken when this copy's Electron fits it.
+// - "platforms": a whole app for each platform, from the Release workflow (run by hand).
+// Player refuses any download whose hash or signature doesn't match the public key below,
+// installs it (keeping this version for Go Back: electron/packages.ts) and restarts.
 
 import { type BrowserWindow, app, net } from 'electron'
 import { spawn } from 'node:child_process'
@@ -15,7 +20,13 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { Readable, Transform } from 'node:stream'
+// Electron's fs treats .asar files as folders; this one deletes an unpacked package's app.asar as the file it is.
+import ofs from 'original-fs'
 import publicKeyPem from './update-key.pem'
+import * as packages from './packages'
+import { newer, shellFits, signedMessage } from './packages'
+
+export { newer, signedMessage }
 
 /** Where releases come from. */
 export const REPOSITORY = 'BlueMoon1337/Player'
@@ -39,18 +50,15 @@ interface Manifest {
   version: string
   notes?: string
   date?: string
-  platforms: Partial<Record<string, PlatformEntry>>
+  platforms?: Partial<Record<string, PlatformEntry>>
+  /** An update package for every platform; `electron` is the Electron it was built with. */
+  interface?: PlatformEntry & { electron?: string }
 }
 
 interface Asset {
   name: string
   /** The API address, which downloads with the token (the browser address doesn't, for a private repository). */
   url: string
-}
-
-/** What's signed for each file. The release script (scripts/sign-update.mjs) builds the same text. */
-export function signedMessage(version: string, platform: string, file: string, sha512: string) {
-  return `Player update\n${version}\n${platform}\n${file}\n${sha512}`
 }
 
 /** GitHub's API, or a stand-in for trying updates (signatures are checked either way). */
@@ -85,11 +93,6 @@ export async function setToken(token: unknown) {
   await fsp.writeFile(tokenPath(), t, { mode: 0o600 })
 }
 
-/** The bundle, for macOS: …/Player.app/Contents/MacOS/Player → …/Player.app */
-function macBundle() {
-  return path.resolve(process.execPath, '..', '..', '..')
-}
-
 /**
  * Why updates can't install here, if they can't:
  * - "translocated": macOS runs an app downloaded from the internet, and not notarized, from a
@@ -102,14 +105,6 @@ export function blocker(): string | null {
   if (process.platform === 'darwin' && process.execPath.includes('/AppTranslocation/')) return 'translocated'
   if (process.platform === 'linux' && !process.env.APPIMAGE) return 'not-appimage'
   return null
-}
-
-/** 1.2.10 > 1.2.9; anything after a "-" (pre-release) is ignored. */
-export function newer(a: string, b: string) {
-  const parse = (v: string) => v.replace(/^v/, '').split('-')[0].split('.').map((n) => Number(n) || 0)
-  const [x, y] = [parse(a), parse(b)]
-  for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0)
-  return false
 }
 
 interface GitHubResponse {
@@ -181,7 +176,7 @@ async function latestRelease(token: string): Promise<{ tag: string; assets: Asse
 }
 
 /** The update found by the last check, ready to install. */
-let pending: { found: Found; entry: PlatformEntry; asset: Asset } | null = null
+let pending: { found: Found; entry: PlatformEntry; asset: Asset; route: 'interface' | 'app' } | null = null
 
 /** Looks for a newer version. Returns it, or null when Player is up to date. */
 export async function check(): Promise<Found | null> {
@@ -203,10 +198,23 @@ export async function check(): Promise<Found | null> {
   const current = app.getVersion()
   pending = null
   if (!manifest?.version || !newer(manifest.version, current)) return null
-  const entry = manifest.platforms?.[process.platform]
-  if (!entry?.file || !entry.sha512 || !entry.signature) {
-    throw new Error(`Player ${manifest.version} has no download for this computer.`)
+  // The update package when it fits this copy (an AppImage is replaced whole), else the whole app.
+  const full = manifest.platforms?.[process.platform]
+  const pkg = manifest.interface
+  const route: 'interface' | 'app' | null =
+    pkg?.file && pkg.sha512 && pkg.signature && packages.blocker() === null && shellFits(pkg.electron)
+      ? 'interface'
+      : full?.file && full.sha512 && full.signature
+        ? 'app'
+        : null
+  if (!route) {
+    throw new Error(
+      pkg && !shellFits(pkg.electron)
+        ? `Player ${manifest.version} needs a newer Player app than this one: download the whole app once from ${REPOSITORY}'s releases.`
+        : `Player ${manifest.version} has no download for this computer.`,
+    )
   }
+  const entry = (route === 'interface' ? pkg : full)!
   const asset = release.assets.find((a) => a.name === entry.file)
   if (!asset) throw new Error(`${release.tag} is missing ${entry.file}.`)
   const found: Found = {
@@ -215,7 +223,7 @@ export async function check(): Promise<Found | null> {
     notes: manifest.notes?.trim() || null,
     date: manifest.date ? manifest.date.slice(0, 10) : null,
   }
-  pending = { found, entry, asset }
+  pending = { found, entry, asset, route }
   return found
 }
 
@@ -249,19 +257,19 @@ async function download(asset: Asset, token: string, file: string, onProgress: (
  * restarts Player. `beforeRestart` runs just before quitting (to skip the "still playing?" guard).
  */
 export async function install(win: BrowserWindow | null, beforeRestart: () => void) {
-  const why = blocker()
+  if (!pending) throw new Error('Check for updates first.')
+  const why = pending.route === 'interface' ? packages.blocker() : blocker()
   if (why === 'translocated') {
     throw new Error('macOS is running Player from a temporary read-only copy, so it can’t be updated. Follow the steps above, then try again.')
   }
   if (why === 'development') throw new Error('Updates install only in the packaged app.')
   if (why === 'not-appimage') throw new Error('Updates install only into the AppImage build on Linux.')
-  if (!pending) throw new Error('Check for updates first.')
   const token = readToken()
   if (!token) throw new Error('Add a GitHub token first.')
-  const { found, entry, asset } = pending
+  const { found, entry, asset, route } = pending
 
   const dir = path.join(app.getPath('userData'), 'updates')
-  await fsp.rm(dir, { recursive: true, force: true })
+  await ofs.promises.rm(dir, { recursive: true, force: true })
   await fsp.mkdir(dir, { recursive: true })
   const file = path.join(dir, path.basename(entry.file))
   const sha512 = await download(asset, token, file, (received, total) =>
@@ -269,51 +277,20 @@ export async function install(win: BrowserWindow | null, beforeRestart: () => vo
   )
 
   const signature = Buffer.from(entry.signature, 'base64')
-  const signedOk = verify(null, Buffer.from(signedMessage(found.version, process.platform, entry.file, entry.sha512)), PUBLIC_KEY, signature)
+  const signedOk = verify(null, Buffer.from(signedMessage(found.version, route === 'interface' ? 'interface' : process.platform, entry.file, entry.sha512)), PUBLIC_KEY, signature)
   if (sha512 !== entry.sha512.toLowerCase() || !signedOk) {
-    await fsp.rm(dir, { recursive: true, force: true })
+    await ofs.promises.rm(dir, { recursive: true, force: true })
     throw new Error('The download doesn’t match its signature, so it wasn’t installed. Try again later.')
   }
 
-  if (process.platform === 'darwin') await installMac(file, dir)
-  else if (process.platform === 'win32') installWindows(file)
-  else await installAppImage(file)
+  // The swap keeps this version for Go Back (Settings ▸ Update); an AppImage is replaced in place.
+  if (route === 'interface') await packages.installDownloaded(file, found.version, 'interface')
+  else if (process.platform === 'linux') await installAppImage(file)
+  else await packages.installDownloaded(file, found.version, 'app')
 
   pending = null
   beforeRestart()
   app.quit()
-}
-
-/** macOS: unpack the new Player.app, and once this one has quit, swap it in and open it. */
-async function installMac(zip: string, dir: string) {
-  const unpacked = path.join(dir, 'unpacked')
-  await run('/usr/bin/ditto', ['-x', '-k', zip, unpacked])
-  const newApp = (await fsp.readdir(unpacked)).find((n) => n.endsWith('.app'))
-  if (!newApp) throw new Error('The update didn’t contain Player.app.')
-  const target = macBundle()
-  try {
-    await fsp.access(path.dirname(target), fs.constants.W_OK)
-  } catch {
-    throw new Error(`Player can’t write to ${path.dirname(target)}. Move Player to your Applications folder, then try again.`)
-  }
-  // A small script outlives Player: wait for it to quit, swap the bundles, reopen.
-  const script = `
-    while kill -0 "$PID" 2>/dev/null; do sleep 0.2; done
-    rm -rf "$OLD.previous"
-    if mv "$OLD" "$OLD.previous" && mv "$NEW" "$OLD"; then rm -rf "$OLD.previous"; else mv "$OLD.previous" "$OLD"; fi
-    xattr -dr com.apple.quarantine "$OLD" 2>/dev/null
-    open "$OLD"
-  `
-  spawn('/bin/sh', ['-c', script], {
-    detached: true,
-    stdio: 'ignore',
-    env: { ...process.env, PID: String(process.pid), OLD: target, NEW: path.join(unpacked, newApp) },
-  }).unref()
-}
-
-/** Windows: the installer closes Player, installs over it silently and starts the new version. */
-function installWindows(installer: string) {
-  spawn(installer, ['/S', '--updated', '--force-run'], { detached: true, stdio: 'ignore' }).unref()
 }
 
 /** Linux: replace the AppImage file itself (allowed while it runs), then start the new one. */
@@ -330,12 +307,4 @@ async function installAppImage(downloaded: string) {
     stdio: 'ignore',
     env: { ...process.env, PID: String(process.pid), TARGET: target },
   }).unref()
-}
-
-function run(cmd: string, args: string[]) {
-  return new Promise<void>((resolve, reject) => {
-    const p = spawn(cmd, args, { stdio: 'ignore' })
-    p.on('error', reject)
-    p.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${path.basename(cmd)} failed (${code})`))))
-  })
 }
