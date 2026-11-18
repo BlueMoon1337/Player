@@ -26,7 +26,13 @@ if (!entry.file.includes(`-${version}-`)) throw new Error(`release/update-interf
 async function gh(method, url, body, headers = {}) {
   const res = await fetch(url.startsWith('http') ? url : `https://api.github.com/repos/${REPO}${url}`, {
     method,
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...headers },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(typeof body === 'string' ? { 'Content-Type': 'application/json' } : {}),
+      ...headers,
+    },
     body,
   })
   if (res.status === 404 && method === 'GET') return null
