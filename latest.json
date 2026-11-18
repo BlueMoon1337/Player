@@ -1,7 +1,7 @@
 {
   "version": "1.4.1",
-  "notes": "- Updates from the updates branch, no token needed\n- publish-package: send JSON requests with their content type\n- Update packages: Install from Zip, Go Back, and releases without Actions minutes\n- Bus levels per song, Reset for the faders, Guide beside the Click\n- Cut sections: leave a section's music out, and the song gets shorter\n- Long songs fit in memory: let go before reading, fold dual-mono stems\n- Pad and transport: an Off or a second Play can't be overtaken\n- Export Player: a copy of the installed app as a disk image or zip\n- Release: build the Mac app on an Intel Mac, and replace files on a retried draft\n- Cleaner sound: proper sample-rate conversion and a lookahead limiter\n- Tempo changes and time signature changes\n- Song Settings ▸ Sections: a section list like MultiTracks'\n- Section changes: this setlist only, or every setlist\n- Recognize KeyFinder's stems\n- Library shows each song's file size\n- Read the artist from KeyFinder exports\n- Auto Pan toggle in Settings ▸ Buses\n- Auto Pan holds on any device, as in Playback\n- Settings Tracks and Buses tabs: Playback's track-to-bus routing\n- Auto Pan as in Playback's simple analog setup",
-  "date": "2026-11-18T23:20:01.172Z",
+  "notes": "- Updates come from the repository's updates branch; no GitHub token needed\n- Add a GitHub Token… only if the repository is made private again",
+  "date": "2026-11-18T23:20:33.202Z",
   "interface": {
     "file": "Player-1.4.1-update.zip",
     "sha512": "904201564ae6076e4fb4faa016360c67cab9fe6237efeccc30e98792380f66361280013547862501402b007824cb14519ba9ac8a5868b9f3b14c769a64670342",
