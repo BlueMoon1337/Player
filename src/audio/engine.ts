@@ -1,5 +1,5 @@
 import { BUSES, type BusId, autoPanOutput, busOutput, trackBus } from './routing'
-import { cuts, nextCut, pastCut, songEnd } from './arrangement'
+import { cuts, nextCut, pastCut, songEnd, toHeard } from './arrangement'
 import { freeMemory, isFoldedStereo } from './decoder'
 import { barBefore, nextBar } from './grid'
 import { type ClickSoundName, renderClick } from './synth'
@@ -1241,7 +1241,9 @@ export class Engine {
     const last = this.lastTickPos
     this.lastTickPos = pos
     const h = this.handoffAt
-    if (h !== null && !this.loop && last !== null && last < h && pos >= h && pos - last < 1.5) {
+    // Measured as heard: skipping a cut that ends at the hand-off point is still running across it.
+    const heard = (t: number) => toHeard(this.song!, t)
+    if (h !== null && !this.loop && last !== null && last < h && pos >= h && heard(pos) - heard(last) < 1.5) {
       this.handoffListeners.forEach((fn) => fn())
       return
     }

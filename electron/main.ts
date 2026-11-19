@@ -227,15 +227,49 @@ function createWindow() {
       })
       if (choice !== 1) {
         e.preventDefault()
+        quitting = false
         return
       }
       quitConfirmed = true
+    }
+    // Edits still waiting to be saved (they're saved a moment after the last change) are saved
+    // first, then the window closes (or Player quits) for real.
+    if (!flushed) {
+      e.preventDefault()
+      flushThenClose()
+      return
     }
     saveWindowState()
   })
   win.on('closed', () => {
     win = null
   })
+}
+
+/** Set once the page has saved what it had waiting; a quit asked for meanwhile is carried on with. */
+let flushed = false
+let flushing = false
+let quitting = false
+
+function flushThenClose() {
+  if (flushing || !win) return
+  flushing = true
+  const target = win
+  const done = () => {
+    ipcMain.removeListener('app:flushed', onFlushed)
+    clearTimeout(timer)
+    flushed = true
+    flushing = false
+    if (quitting) app.quit()
+    else if (!target.isDestroyed()) target.close()
+  }
+  const onFlushed = (e: Electron.IpcMainEvent) => {
+    if (e.sender === target.webContents) done()
+  }
+  // A page that doesn't answer (hung, or still loading) doesn't hold the quit up for long.
+  const timer = setTimeout(done, 3000)
+  ipcMain.on('app:flushed', onFlushed)
+  target.webContents.send('app:flush')
 }
 
 function setActive(on: boolean) {
@@ -622,6 +656,9 @@ if (!app.requestSingleInstanceLock()) {
     })
   })
 
+  app.on('before-quit', () => {
+    quitting = true
+  })
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()
   })

@@ -260,6 +260,8 @@ export interface DesktopAPI {
     takeResult(): Promise<UpdateResult | null>
   }
   onMenu(cb: (cmd: MenuCommand) => void): () => void
+  /** Player is closing: save what's waiting; it closes when the promise settles (or after a few seconds). */
+  onFlush(cb: () => Promise<void>): () => void
 }
 
 /** URL of a spoken cue made by the main process. */

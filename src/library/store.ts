@@ -73,20 +73,40 @@ function persisted(): LibraryState {
   return { setlists: state.setlists, currentSetlist: state.currentSetlistId, hiddenDemos: state.hiddenDemos }
 }
 
+/** The save waiting to happen, if there is one. */
+let savePending = false
+/** The save under way, so the next one waits for it: an earlier save can't land after a later one. */
+let saving: Promise<void> = Promise.resolve()
+
+function saveNow(): Promise<void> {
+  window.clearTimeout(saveTimer)
+  if (!savePending) return saving
+  savePending = false
+  if (desktop) {
+    const state = persisted()
+    saving = saving
+      .then(() => desktop!.library.saveState(state))
+      .catch((e: Error) => saveError?.(`Couldn’t save the setlists: ${e.message}`))
+  } else {
+    try {
+      localStorage.setItem(WEB_KEY, JSON.stringify(persisted()))
+    } catch {
+      /* storage unavailable */
+    }
+  }
+  return saving
+}
+
 function scheduleSave() {
   window.clearTimeout(saveTimer)
-  saveTimer = window.setTimeout(() => {
-    if (desktop) {
-      desktop.library.saveState(persisted()).catch((e: Error) => saveError?.(`Couldn’t save the setlists: ${e.message}`))
-    } else {
-      try {
-        localStorage.setItem(WEB_KEY, JSON.stringify(persisted()))
-      } catch {
-        /* storage unavailable */
-      }
-    }
-  }, 150)
+  savePending = true
+  saveTimer = window.setTimeout(() => void saveNow(), 150)
 }
+
+/** Saves the setlists now if a save is waiting (Player is closing). */
+export const flushLibrarySave = () => saveNow()
+
+if (!desktop) window.addEventListener('pagehide', () => void saveNow())
 
 // ---------------------------------------------------------------- loading
 

@@ -34,6 +34,7 @@ import {
   songChanged,
   songEnd,
   useLibrary,
+  flushLibrarySave,
 } from './library/store'
 import { type MenuCommand, desktop } from './platform'
 import { useSettings } from './settings'
@@ -174,7 +175,13 @@ export default function App() {
   }
   const padPicker = useRef<HTMLInputElement>(null)
   const peaks = useRef(new Map<string, Float32Array>())
-  const saveTimers = useRef(new Map<string, number>())
+  /** Song edits waiting to be saved (a moment after the last change), by song id. */
+  const saveTimers = useRef(new Map<string, { timer: number; run: () => Promise<void> }>())
+  /**
+   * The latest song asked for (by a click, a key, the end of a song…) while it loads: an earlier
+   * request that finishes loading later doesn't take its place, and ← / → step from it.
+   */
+  const selection = useRef<{ n: number; id: string | null }>({ n: 0, id: null })
 
   /**
    * Where section changes go: the current setlist only, unless told every setlist. Back to this
@@ -365,6 +372,16 @@ export default function App() {
 
   // Desktop: look for a newer Player soon after start-up and every few hours.
   useEffect(() => startUpdateChecks(), [])
+  // Desktop: Player is closing (or restarting into an update): save the edits still waiting.
+  useEffect(
+    () =>
+      desktop?.onFlush(async () => {
+        const waiting = [...saveTimers.current.values()]
+        for (const w of waiting) window.clearTimeout(w.timer)
+        await Promise.all([...waiting.map((w) => w.run()), flushLibrarySave()])
+      }),
+    [],
+  )
   // After an update or Go Back restarted Player: how it went, once.
   useEffect(() => {
     const r = updates.result
@@ -380,9 +397,9 @@ export default function App() {
                 ? 'The version you went back from is kept: Settings ▸ Update… can return to it.'
                 : 'The version before is kept: Settings ▸ Update… ▸ Go Back returns to it.',
           }
-        : { title: `${what} didn’t work`, message: `${r.message} Player is still ${updates.version ?? 'the version it was'}.` },
+        : { title: `${what} didn’t work`, message: r.message || 'Player wasn’t changed.' },
     )
-  }, [updates.result, updates.version])
+  }, [updates.result])
 
   // Load the library (from the library folder on desktop) and its setlists.
   useEffect(() => {
@@ -540,6 +557,8 @@ export default function App() {
     async (id: string, start: 'cue' | 'play' | { crossfade: number | null } = 'cue') => {
       const target = lib.songs[id]
       if (!target) return
+      const ticket = ++selection.current.n
+      selection.current.id = id
       const handoff = typeof start === 'object' ? start : null
       if (!handoff) {
         engine.pause()
@@ -551,7 +570,19 @@ export default function App() {
           freeMemory()
         }
       }
-      await ensureStems(target, !!handoff)
+      try {
+        await ensureStems(target, !!handoff)
+      } catch (e) {
+        if (ticket === selection.current.n) selection.current.id = null
+        throw e
+      }
+      if (ticket !== selection.current.n) {
+        // Another song was asked for while this one loaded: that one is loaded instead, and this
+        // one's audio let go (unless it's that same song, or the one playing).
+        if (selection.current.id !== id && engine.currentSong !== target && target.source !== 'user') target.stems = []
+        return
+      }
+      selection.current.id = null
       // Demo and library stems can be reloaded at any time, so only keep the current song in memory.
       for (const s of Object.values(lib.songs)) if (s.id !== id && s.source !== 'user') s.stems = []
       if (!peaks.current.has(id)) peaks.current.set(id, computePeaks(target.stems, target.duration))
@@ -653,7 +684,8 @@ export default function App() {
 
   const step = useCallback(
     (dir: -1 | 1) => {
-      const i = songs.findIndex((s) => s.id === currentId)
+      const from = selection.current.id ?? currentId
+      const i = songs.findIndex((s) => s.id === from)
       const next = songs[i + dir]
       if (next) void selectSong(next.id)
     },
@@ -662,7 +694,9 @@ export default function App() {
 
   /** ← key: back to the start, or to the previous song when already there. */
   const onPrev = useCallback(() => {
-    if (engine.position > 2 || !songs.length || songs[0].id === currentId) engine.seek(0)
+    // While a song is still loading, ← goes to the one before it (→ then ← comes back).
+    if (selection.current.id !== null) step(-1)
+    else if (engine.position > 2 || !songs.length || songs[0].id === currentId) engine.seek(0)
     else step(-1)
   }, [songs, currentId, step])
 
@@ -674,6 +708,7 @@ export default function App() {
       // Room first, as when choosing a song: what's loaded is let go before the new songs are read
       // (and loaded again if nothing comes of the import).
       const previous = engine.currentSong?.id ?? null
+      selection.current = { n: selection.current.n + 1, id: null }
       engine.pause()
       engine.release()
       for (const s of Object.values(getLibrary().songs)) if (s.source !== 'user') s.stems = []
@@ -906,15 +941,15 @@ export default function App() {
         setVersion((v) => v + 1)
         songChanged()
         if (!desktop || changed.source !== 'library') return
-        window.clearTimeout(saveTimers.current.get(changed.id))
-        saveTimers.current.set(
-          changed.id,
-          window.setTimeout(() => {
-            desktop!.library.saveSong(recordFromSong(changed)).catch((e: Error) =>
-              setNotice({ kind: 'error', text: `Couldn't save “${changed.title}”: ${e.message}` }),
-            )
-          }, 400),
-        )
+        const pending = saveTimers.current.get(changed.id)
+        if (pending) window.clearTimeout(pending.timer)
+        const run = () => {
+          saveTimers.current.delete(changed.id)
+          return desktop!.library.saveSong(recordFromSong(changed)).catch((e: Error) =>
+            setNotice({ kind: 'error', text: `Couldn't save “${changed.title}”: ${e.message}` }),
+          )
+        }
+        saveTimers.current.set(changed.id, { timer: window.setTimeout(run, 400), run })
       }),
     [],
   )

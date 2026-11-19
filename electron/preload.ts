@@ -64,6 +64,18 @@ const api: DesktopAPI = {
     revert: () => ipcRenderer.invoke('updates:revert'),
     takeResult: () => ipcRenderer.invoke('updates:take-result'),
   },
+  onFlush: (cb) => {
+    const listener = () => {
+      void Promise.resolve()
+        .then(cb)
+        .catch(() => {})
+        .finally(() => ipcRenderer.send('app:flushed'))
+    }
+    ipcRenderer.on('app:flush', listener)
+    return () => {
+      ipcRenderer.removeListener('app:flush', listener)
+    }
+  },
   onMenu: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, cmd: MenuCommand) => cb(cmd)
     ipcRenderer.on('menu', listener)

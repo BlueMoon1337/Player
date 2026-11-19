@@ -75,7 +75,14 @@ async function toBranch() {
     if (previous && !newer(version, previous) && !force) {
       throw new Error(`The updates branch already has ${previous}; raise the version (or pass --force).`)
     }
-    for (const f of fs.readdirSync(dir)) if (/-update\.zip$/.test(f)) fs.rmSync(path.join(dir, f))
+    // The previous version's zip stays: GitHub's file address can serve the old latest.json for a
+    // few minutes, and a copy reading it must still find the zip it names. Older ones go (they
+    // stay in the branch's history).
+    const versionOf = (f) => /^Player-(.+)-update\.zip$/.exec(f)?.[1]
+    for (const f of fs.readdirSync(dir)) {
+      const v = versionOf(f)
+      if (v && v !== previous && v !== version) fs.rmSync(path.join(dir, f))
+    }
     fs.copyFileSync(zip, path.join(dir, entry.file))
     const manifest = { version, notes: changes(previous), date: new Date().toISOString(), interface: entry }
     fs.writeFileSync(path.join(dir, 'latest.json'), JSON.stringify(manifest, null, 2) + '\n')
