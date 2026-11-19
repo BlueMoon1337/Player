@@ -1,11 +1,11 @@
 {
-  "version": "1.4.1",
-  "notes": "- Updates come from the repository's updates branch; no GitHub token needed\n- Add a GitHub Token… only if the repository is made private again",
-  "date": "2026-11-18T23:20:33.202Z",
+  "version": "1.4.2",
+  "notes": "- Fix: the last song asked for wins, edits saved on quit, overlap after a cut\n- publish-package: a first publish's notes start at the previous version",
+  "date": "2026-11-19T00:50:25.524Z",
   "interface": {
-    "file": "Player-1.4.1-update.zip",
-    "sha512": "904201564ae6076e4fb4faa016360c67cab9fe6237efeccc30e98792380f66361280013547862501402b007824cb14519ba9ac8a5868b9f3b14c769a64670342",
+    "file": "Player-1.4.2-update.zip",
+    "sha512": "8e2b8625ba0aaa3873ada51585b70c7249ba3dbe540c072c1bfd17b15fbaeef64a4a17be7f0a90f205baf3a61c4830a55753cc9428316792ba30dd1ea6227dcd",
     "electron": "44.7.0",
-    "signature": "Hfz8NFeNEm3s0sJfWViOOA5r0GW/UFBiClhGtF/7VXuP//34UYznVk7JRApQff+mPvaRtzIvghViOjJAhnvSCQ=="
+    "signature": "6+ivPmlx4r3RgqU6Ecor1dTPZ7am3fV284CExYY/QReckHabfHFkVzRIE7LXgnPl00WLjxapK3YjgEHDeNLkDg=="
   }
 }
