@@ -1,11 +1,11 @@
 {
-  "version": "1.4.2",
-  "notes": "- Fix: the last song asked for wins, edits saved on quit, overlap after a cut\n- publish-package: a first publish's notes start at the previous version",
-  "date": "2026-11-19T00:50:25.524Z",
+  "version": "1.4.3",
+  "notes": "- Fade Out at any section: the song fades out over the end of a section and stops there (section menu ▸ Fade Out Here; drag the fade's handle to change its length). The click keeps going to the end of the section.",
+  "date": "2026-11-21T04:48:09.259Z",
   "interface": {
-    "file": "Player-1.4.2-update.zip",
-    "sha512": "8e2b8625ba0aaa3873ada51585b70c7249ba3dbe540c072c1bfd17b15fbaeef64a4a17be7f0a90f205baf3a61c4830a55753cc9428316792ba30dd1ea6227dcd",
+    "file": "Player-1.4.3-update.zip",
+    "sha512": "7212affcf578f6980c91f4b7453edfb334ab23a0ce7ff6d9700ba03b9b0160419a6d5c8b3d57183a6bcbf8f1ea578fdbf24bc674d55ea0bd8427582fdce49622",
     "electron": "44.7.0",
-    "signature": "6+ivPmlx4r3RgqU6Ecor1dTPZ7am3fV284CExYY/QReckHabfHFkVzRIE7LXgnPl00WLjxapK3YjgEHDeNLkDg=="
+    "signature": "ClczWmlYCpSODlAqmQg6u7lMzu4k18R2pIOsbGtnlxkSrlIZVLhC414Pcf/UqUEQ1tiCf4rTdroIx+I5o0G2CA=="
   }
 }
