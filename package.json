@@ -2,7 +2,7 @@
   "name": "player",
   "productName": "Player",
   "private": true,
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Multitrack stem player for live performance: click, sections, loops, mixer and multi-output routing.",
   "author": "BlueMoon1337",
   "type": "module",
