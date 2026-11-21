@@ -6,6 +6,10 @@
  * cut, carries on from the end of it at the same instant (as a section jump does). So there are
  * two clocks: the song's own time, which the audio, sections, click and tempo map are in, and the
  * time as heard, without the cuts, which the timeline, the time display and the section list show.
+ *
+ * A section can also have a Fade Out: the song fades out over a few seconds ending at the end of
+ * that section, and stops there. The sections after it stay on the timeline (dimmed); playing
+ * from one of them plays on to the real end.
  */
 import type { Section, Song } from './types'
 import { sectionEnd } from './types'
@@ -33,9 +37,14 @@ export function cuts(song: Arranged): Cut[] {
 
 export const hasCuts = (song: Arranged) => song.sections.some((s) => s.skip)
 
-/** How long the song plays for, as arranged. */
-export function playedLength(song: Arranged): number {
+/** How long the whole song is, as heard (the cuts left out; the timeline's length). */
+export function heardLength(song: Arranged): number {
   return cuts(song).reduce((t, c) => t - (c.end - c.start), song.duration)
+}
+
+/** How long the song plays for, as arranged: without the cuts, and up to its fade-out's end. */
+export function playedLength(song: Arranged): number {
+  return toHeard(song, songEnd(song))
 }
 
 /** The song's own time → the time as heard. A time inside a cut is where the cut is heard (its join). */
@@ -66,10 +75,46 @@ export function nextCut(song: Arranged, t: number): Cut | null {
   return cuts(song).find((c) => c.start > t + 1e-4) ?? null
 }
 
-/** Where the song stops, in its own time: the start of a cut that runs to the end, else its end. */
-export function songEnd(song: Arranged): number {
+/** Where the music runs out, in the song's own time: the start of a cut that runs to the end, else its end. */
+export function fullEnd(song: Arranged): number {
   const last = cuts(song).at(-1)
   return last && last.end >= song.duration - 1e-3 ? last.start : song.duration
+}
+
+/** Where the song stops, as arranged: its fade-out's end, else where the music runs out. */
+export function songEnd(song: Arranged): number {
+  const f = fadeOut(song)
+  return f ? Math.min(f.end, fullEnd(song)) : fullEnd(song)
+}
+
+/** The longest and shortest fade a section can be given, in seconds. */
+export const FADE_MIN = 1
+export const FADE_MAX = 60
+/** A new fade's length. */
+export const FADE_DEFAULT = 8
+
+/** A section's fade-out: where it starts and ends (the song's own time) and how long it's heard for. */
+export interface FadeOut {
+  section: Section
+  index: number
+  start: number
+  end: number
+  length: number
+}
+
+/** The song's fade-out, if a section has one: it ends at the end of the first such section that plays. */
+export function fadeOut(song: Arranged): FadeOut | null {
+  const index = song.sections.findIndex((s) => !s.skip && (s.fadeOut ?? 0) > 0)
+  if (index < 0) return null
+  const section = song.sections[index]
+  const end = sectionEnd(song as Song, index)
+  const heardEnd = toHeard(song, end)
+  const length = Math.max(0, Math.min(section.fadeOut!, heardEnd))
+  if (length <= 0) return null
+  // As heard: a fade that reaches back over a cut takes that much longer in the song's own time.
+  let start = toSong(song, heardEnd - length)
+  if (start > end) start = end
+  return { section, index, start, end, length }
 }
 
 /** The sections that play, with where each starts and ends as heard. */

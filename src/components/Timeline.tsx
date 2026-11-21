@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Engine, EngineState, JumpMode, LoopMode } from '../audio/engine'
-import { heardSections, joins, pastCut, playedLength, toHeard, toSong } from '../audio/arrangement'
+import { FADE_DEFAULT, fadeOut, heardLength as heardLengthOf, heardSections, joins, pastCut, toHeard, toSong } from '../audio/arrangement'
 import { beatGrid, nearestBar } from '../audio/grid'
 import {
   SECTION_TYPES,
@@ -16,6 +16,7 @@ import {
 import { UNDO_KEY, showNote } from '../library/history'
 import { getSettings, useSettings } from '../settings'
 import { type MenuEntry, type MenuItem, promptDialog, showContextMenu } from './Ask'
+import { FadeOverlay } from './FadeOverlay'
 import { LoopForeverIcon, LoopOnceIcon } from './LoopIcons'
 
 interface Props {
@@ -121,7 +122,7 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
   const [viewW, setViewW] = useState(1000)
   const handScrollUntil = useRef(0)
   // Everything here is drawn as the song is heard: cut sections (arrangement.ts) are left out.
-  const heardLength = song ? playedLength(song) : 0
+  const heardLength = song ? heardLengthOf(song) : 0
   const heard = song ? heardSections(song) : []
   const contentW = song ? Math.max(viewW, Math.round((heardLength / VISIBLE_SECONDS) * viewW)) : viewW
 
@@ -168,7 +169,7 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
       g.setTransform(dpr, 0, 0, dpr, 0, 0)
       g.clearRect(0, 0, w, h)
       if (!song) return
-      const length = playedLength(song)
+      const length = heardLengthOf(song)
       const x = (t: number) => (t / length) * w
       if (editing) {
         drawSongMap(g, song, peaks, w, h)
@@ -219,7 +220,7 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
       lastDraw = now
       if (song && playhead.current) {
         const pos = toHeard(song, engine.position)
-        const length = playedLength(song)
+        const length = heardLengthOf(song)
         playhead.current.style.left = `${(pos / length) * 100}%`
         const sc = scroller.current
         const width = wrap.current?.offsetWidth ?? 0
@@ -332,6 +333,7 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
                 ✂
               </button>
             ))}
+            <FadeOverlay song={song} length={heardLength} edit={edit} />
             <div className="playhead" ref={playhead} />
           </div>
         </div>
@@ -394,6 +396,7 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
                 }}
               />
             )}
+            <FadeOverlay song={song} length={heardLength} edit={edit} />
             <div className="playhead" ref={playhead} />
           </div>
         </div>
@@ -407,7 +410,7 @@ export function Timeline({ engine, state, song, peaks, jumpMode, version, editin
 /** Edit mode's look: a pale waveform over bar lines; the section blocks are drawn as elements on top. */
 /** Waveform Grid: a line on every bar, fainter ones on the beats (when they're far enough apart). */
 function drawGrid(g: CanvasRenderingContext2D, song: Song, w: number, h: number, barAlpha: number) {
-  const length = playedLength(song)
+  const length = heardLengthOf(song)
   for (const b of beatGrid(song)) {
     // Beats in a cut section aren't heard.
     if (b.time < 0 || pastCut(song, b.time) !== null) continue
@@ -420,7 +423,7 @@ function drawGrid(g: CanvasRenderingContext2D, song: Song, w: number, h: number,
 
 /** The waveform's height at a pixel of the timeline as heard (`w` wide), from the song's own peaks. */
 function peakAt(song: Song, peaks: Float32Array, px: number, w: number): number {
-  const length = playedLength(song)
+  const length = heardLengthOf(song)
   const from = toSong(song, (px / w) * length)
   const to = from + length / w
   const b = Math.floor((from / song.duration) * peaks.length)
@@ -508,6 +511,28 @@ function removeMarker(song: Song, i: number, edit: Edit) {
   showNote(`Removed the marker “${name}”; its music joins the section before. ${UNDO_KEY} undoes this.`, true)
 }
 
+/**
+ * Fade Out Here: the song fades out over the end of this section and stops there (one fade per
+ * song: setting it here moves it from another section). On a section that has it: Remove Fade Out.
+ */
+function fadeItem(song: Song, i: number, edit: Edit): MenuItem {
+  const s = song.sections[i]
+  const current = fadeOut(song)
+  if (current?.section === s) {
+    return { label: 'Remove Fade Out', onClick: () => edit(`Remove Fade Out`, () => delete s.fadeOut) }
+  }
+  return {
+    label: current ? 'Move Fade Out Here' : 'Fade Out Here',
+    onClick: () => {
+      edit(`Fade Out at “${s.name}”`, () => {
+        for (const x of song.sections) delete x.fadeOut
+        s.fadeOut = Math.min(FADE_DEFAULT, Math.max(1, sectionEnd(song, i) - s.start))
+      })
+      showNote(`The song fades out at the end of “${s.name}” and stops there. Drag the fade’s handle to change its length; ${UNDO_KEY} undoes this.`, true)
+    },
+  }
+}
+
 /** A section's loop button cycles: off → repeat once → repeat until turned off → off. */
 function loopTitle(name: string, mode: LoopMode | null) {
   if (mode === 'once') return `Repeating ${name} once (click to repeat it until turned off)`
@@ -538,6 +563,7 @@ function sectionMenu(song: Song, i: number, engine: Engine, edit: Edit, looping:
           song.sections.sort((a, b) => a.start - b.start)
         }),
     },
+    fadeItem(song, i, edit),
     'separator',
     {
       label: 'Cut Section (Leave Out Its Music)',

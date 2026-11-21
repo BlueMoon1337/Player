@@ -50,6 +50,11 @@ async function writeJsonAtomic(file: string, data: unknown) {
   await fs.rename(tmp, file)
 }
 
+/** A section's fade-out length, if it's a sensible one (seconds). */
+function fadeSeconds(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0.5 && v <= 600 ? Math.round(v * 100) / 100 : null
+}
+
 /** Reads library.json (version 1 had a single setlist), keeping only well-formed entries. */
 function parseLibraryFile(raw: unknown): LibraryState | null {
   const lib = raw as Record<string, unknown> | null
@@ -86,6 +91,8 @@ function parseLibraryFile(raw: unknown): LibraryState | null {
             start: Math.max(0, x.start),
             // Cut from this setlist's arrangement: its music is left out.
             ...((x as { skip?: unknown }).skip === true ? { skip: true } : {}),
+            // Fade Out: the song fades out over this many seconds, ending with this section.
+            ...(fadeSeconds((x as { fadeOut?: unknown }).fadeOut) ? { fadeOut: fadeSeconds((x as { fadeOut?: unknown }).fadeOut)! } : {}),
           }))
         }
       }

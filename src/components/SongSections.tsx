@@ -4,7 +4,7 @@
  */
 import { useState } from 'react'
 import type { Engine } from '../audio/engine'
-import { hasCuts, playedLength, toHeard, toSong } from '../audio/arrangement'
+import { FADE_DEFAULT, FADE_MAX, FADE_MIN, fadeOut, hasCuts, heardLength, playedLength, toHeard, toSong } from '../audio/arrangement'
 import { nearestBar } from '../audio/grid'
 import { type Song, sectionColor, sectionEnd, uid } from '../audio/types'
 import { promptDialog } from './Ask'
@@ -97,6 +97,34 @@ export function StartField({ value, disabled, onCommit }: { value: number; disab
   )
 }
 
+/** A fade's length in seconds, typed in: applied when you leave the box or press Return. */
+function FadeField({ value, onCommit }: { value: number; onCommit: (seconds: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const commit = () => {
+    if (draft === null) return
+    const n = Number(draft.replace(',', '.'))
+    if (Number.isFinite(n) && n > 0) onCommit(Math.max(FADE_MIN, Math.min(FADE_MAX, Math.round(n * 10) / 10)))
+    setDraft(null)
+  }
+  return (
+    <input
+      className="sec-fade-len"
+      aria-label="Fade out length in seconds"
+      inputMode="decimal"
+      value={draft ?? String(value)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') commit()
+        if (e.key === 'Escape') {
+          e.stopPropagation()
+          setDraft(null)
+        }
+      }}
+    />
+  )
+}
+
 export function SongSections({
   engine,
   song,
@@ -113,6 +141,7 @@ export function SongSections({
   const sort = () => song.sections.sort((a, b) => a.start - b.start)
   const clash = (t: number, except?: string) => song.sections.some((s) => s.id !== except && Math.abs(s.start - t) < 0.05)
   const latest = song.duration - 0.1
+  const fade = fadeOut(song)
 
   /** A new section halfway through the last one (on a bar), or at the playhead. */
   const add = (at?: number) => {
@@ -193,6 +222,28 @@ export function SongSections({
                 </button>
               )}
               <span className="dialog-actions-spacer" />
+              {fade?.section === s ? (
+                <span className="sec-fade" title="The song fades out over the end of this section and stops there">
+                  Fades out over
+                  <FadeField value={s.fadeOut!} onCommit={(n) => n !== s.fadeOut && edit('Change Fade Out', () => (s.fadeOut = n))} />s
+                  <button className="sec-fade-off" title="Remove the fade out" aria-label="Remove fade out" onClick={() => edit('Remove Fade Out', () => delete s.fadeOut)}>
+                    ✕
+                  </button>
+                </span>
+              ) : (
+                <button
+                  className="small sec-fade-btn"
+                  title={`Fade out at the end of ${s.name}: the song stops there${fade ? ` (instead of at ${fade.section.name})` : ''}`}
+                  onClick={() =>
+                    edit(`Fade Out at “${s.name}”`, () => {
+                      for (const x of song.sections) delete x.fadeOut
+                      s.fadeOut = Math.min(FADE_DEFAULT, Math.max(1, sectionEnd(song, i) - s.start))
+                    })
+                  }
+                >
+                  Fade Out
+                </button>
+              )}
               {song.sections.filter((x) => !x.skip).length > 1 && (
                 <button
                   className="sec-del"
@@ -208,9 +259,16 @@ export function SongSections({
         })}
       </div>
       <div className="sec-actions">
-        {hasCuts(song) && (
+        {(hasCuts(song) || fade) && (
           <span className="muted sec-length">
-            Plays for {formatStart(playedLength(song)).slice(0, 5)} ({formatStart(song.duration - playedLength(song)).slice(0, 5)} cut)
+            Plays for {formatStart(playedLength(song)).slice(0, 5)} (
+            {[
+              hasCuts(song) && `${formatStart(song.duration - heardLength(song)).slice(0, 5)} cut`,
+              fade && `fades out at the end of ${fade.section.name}`,
+            ]
+              .filter(Boolean)
+              .join(', ')}
+            )
           </span>
         )}
         <button className="small" onClick={() => add()}>

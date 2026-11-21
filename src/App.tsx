@@ -39,7 +39,7 @@ import {
 import { type MenuCommand, desktop } from './platform'
 import { useSettings } from './settings'
 import { renderCues, songCuePhrases } from './audio/cues'
-import { songEnd as heardEnd } from './audio/arrangement'
+import { fadeOut, songEnd as heardEnd } from './audio/arrangement'
 import { decodeAudio, freeMemory } from './audio/decoder'
 import { type ExportFormat, type PadRecord, type SongEndSetting, cueUrl, padUrl } from './platform/types'
 import { type LibraryImport, importIntoLibrary, loadSongStems, recordFromSong } from './platform/library'
@@ -671,8 +671,10 @@ export default function App() {
       void ensureStems(next, true).catch(() => {})
     }
     if (end !== 'overlap' && end !== 'crossfade') return void engine.setHandoff(null)
-    // The last section heard (cut sections don't play), or a fade length before the end.
-    const kept = song.sections.filter((s) => !s.skip)
+    // The last section heard (cut sections don't play, nor those after a section's fade-out), or a
+    // fade length before the end.
+    const faded = fadeOut(song)
+    const kept = song.sections.filter((s, i) => !s.skip && (!faded || i <= faded.index))
     const last = kept.length > 1 ? kept[kept.length - 1].start : null
     engine.setHandoff(last ?? Math.max(0, heardEnd(song) - fadeSeconds))
     return engine.onHandoff(() => {

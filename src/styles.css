@@ -482,6 +482,125 @@ button.t-edit.on {
   border-radius: 4px;
 }
 
+/* Section Fade Out (FadeOverlay.tsx): the slope, its handle and time, and the music after it. */
+.fade-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.fade-shape {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  overflow: visible;
+}
+.fade-shape path {
+  fill: rgba(5, 6, 9, 0.55);
+}
+.fade-shape .fade-line {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.5;
+  opacity: 0.85;
+}
+.fade-after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 6px;
+  background: rgba(5, 6, 9, 0.62);
+  overflow: hidden;
+}
+.fade-after span {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.fade-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+}
+.fade-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -0.5px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.55);
+}
+.fade-time {
+  position: absolute;
+  bottom: calc(70% + 11px);
+  left: 0;
+  transform: translateX(-50%);
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgba(240, 242, 245, 0.92);
+  color: #111;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fade-knob {
+  position: absolute;
+  top: 30%;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  min-width: 0;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.35);
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+}
+.fade-knob:hover,
+.fade-knob:focus-visible {
+  background: #4ade80;
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.35);
+}
+
+/* Song Settings ▸ Sections: a section's Fade Out. */
+.sec-fade-btn {
+  opacity: 0.45;
+}
+.sec-row:hover .sec-fade-btn,
+.sec-fade-btn:focus-visible {
+  opacity: 1;
+}
+.sec-fade {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #86efac;
+  white-space: nowrap;
+}
+.sec-fade-len {
+  width: 46px;
+  padding: 3px 5px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.sec-fade-off {
+  min-width: 0;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
 /* ---------------------------------------------------------------------- lower */
 
 .lower {

@@ -1,5 +1,5 @@
 import { BUSES, type BusId, autoPanOutput, busOutput, trackBus } from './routing'
-import { cuts, nextCut, pastCut, songEnd, toHeard } from './arrangement'
+import { cuts, fadeOut, fullEnd, nextCut, pastCut, toHeard } from './arrangement'
 import { freeMemory, isFoldedStereo } from './decoder'
 import { barBefore, nextBar } from './grid'
 import { type ClickSoundName, renderClick } from './synth'
@@ -192,6 +192,15 @@ export class Engine {
   /** Timeline base in effect before a scheduled (quantised) jump lands. */
   private prevBase: { ctxTime: number; offset: number } | null = null
   private pausedPos = 0
+  /**
+   * The section Fade Out applies: playback started before the fade's end. Started after it (to play
+   * the sections after the fade), the song plays on to its real end, without the fade.
+   */
+  private fadeArmed = true
+  /** The fade-out's ramp is scheduled on the tracks. */
+  private fadeOutScheduled = false
+  /** The song stopped at its end (or its fade's end): Play starts it from the top. */
+  private atEnd = false
   private loop: Loop | null = null
   private pendingJump: PendingJump | null = null
   private fading: 'in' | 'out' | null = null
@@ -714,6 +723,9 @@ export class Engine {
     this.loop = null
     this.pendingJump = null
     this.song = song
+    this.fadeArmed = true
+    this.fadeOutScheduled = false
+    this.atEnd = false
     this.dropSongChannels()
     // Bus settings and the master level may be kept per song; the cues are made for each song.
     this.groups.clear()
@@ -808,6 +820,7 @@ export class Engine {
 
   /** Undoes a pre-roll or crossfade fade-in that's still under way: the stems back at full level. */
   private resetStemFades() {
+    this.fadeOutScheduled = false
     const now = this.ctx.currentTime
     for (const ch of this.channels.values()) {
       if (!ch.fromSong || ch.group !== 'stem') continue
@@ -889,7 +902,15 @@ export class Engine {
 
   /** Call after mutating song.sections so an active loop follows its section. */
   sectionsChanged() {
-    if (!this.song || !this.loop) return
+    if (!this.song) return
+    // A fade-out added, moved or changed: it applies from here on (one already behind the
+    // playhead doesn't stop the song), and one under way follows the change.
+    this.armFade(this.position)
+    if (this.fadeOutScheduled) {
+      this.clearFadeOut()
+      if (this.playing) this.scheduleFadeOut()
+    }
+    if (!this.loop) return
     const idx = this.song.sections.findIndex((s) => s.id === this.loop!.sectionId)
     if (idx < 0) this.setLoop(null)
     else this.setLoop(this.loop.sectionId, this.loop.mode)
@@ -972,7 +993,10 @@ export class Engine {
     if (this.ctx.state !== 'running') await this.ctx.resume()
     if (request !== this.transportRequest || !this.song || this.playing) return
     if (this.fading !== 'in') this.cancelFade()
-    if (this.pausedPos >= songEnd(this.song) - 0.05) this.pausedPos = 0
+    if (this.atEnd || this.pausedPos >= fullEnd(this.song) - 0.05) this.pausedPos = 0
+    this.atEnd = false
+    this.armFade(this.pausedPos)
+    this.fadeOutScheduled = false
     // Song Section Pre-roll: from the start of a section, start a bar early, the click counting
     // in and the tracks fading up to full by the section's downbeat.
     let preroll = 0
@@ -1026,6 +1050,8 @@ export class Engine {
     time = pastCut(this.song, time) ?? time
     if (this.loop && (time < this.loop.start || time >= this.loop.end)) this.loop = null
     this.pendingJump = null
+    this.atEnd = false
+    this.armFade(time)
     if (this.playing) {
       this.stopSources()
       this.resetStemFades()
@@ -1054,6 +1080,7 @@ export class Engine {
       const when = this.pendingJump.when
       this.stopSources()
       this.startSources(target, when)
+      this.clearFadeOut(when)
       this.pendingJump = { sectionId, when }
       this.emit()
       return
@@ -1076,6 +1103,8 @@ export class Engine {
     this.prevBase = { ctxTime: this.startCtxTime, offset: this.startOffset }
     this.stopSources(when)
     this.startSources(target, when)
+    // A fade-out under way stops where the jump lands; the fade comes again if the song reaches it.
+    this.clearFadeOut(when)
     this.pendingJump = { sectionId, when }
     this.emit()
   }
@@ -1102,6 +1131,8 @@ export class Engine {
       const start = song.sections[idx].start
       const end = sectionEnd(song, idx)
       this.loop = { sectionId, start, end, mode }
+      // While a loop holds playback, the fade waits: the tracks come back up.
+      this.clearFadeOut()
       const pos = this.position
       for (const s of this.sources) {
         if (pos < end) {
@@ -1201,10 +1232,78 @@ export class Engine {
     }
   }
 
+  /** Where playback stops: the fade-out's end, while it applies, else where the music runs out. */
+  private endOfSong(): number {
+    const song = this.song!
+    const f = this.fadeArmed ? fadeOut(song) : null
+    return f ? Math.min(f.end, fullEnd(song)) : fullEnd(song)
+  }
+
+  /** Whether a fade-out applies to playback started (or landing) at `from`. */
+  private armFade(from: number) {
+    const f = this.song ? fadeOut(this.song) : null
+    this.fadeArmed = !f || from < f.end - 0.05
+  }
+
+  /** Takes a scheduled fade-out off the tracks at `when` (now if not given): back to full level. */
+  private clearFadeOut(when?: number) {
+    if (!this.fadeOutScheduled) return
+    this.fadeOutScheduled = false
+    const at = when ?? this.ctx.currentTime
+    for (const ch of this.channels.values()) {
+      if (!ch.fromSong || ch.group !== 'stem') continue
+      const g = ch.input.gain
+      if (typeof g.cancelAndHoldAtTime === 'function') g.cancelAndHoldAtTime(at)
+      else g.cancelScheduledValues(at)
+      g.setValueAtTime(1, at)
+    }
+  }
+
+  /**
+   * Section Fade Out: as playback reaches the fade, the tracks ramp down to silence by its end (the
+   * click and spoken cues keep going, to count the band out). Started inside the fade, they come in
+   * at the level the fade has reached there.
+   */
+  private scheduleFadeOut() {
+    const song = this.song!
+    const f = fadeOut(song)
+    if (!f || !this.fadeArmed || this.fadeOutScheduled || this.loop) return
+    const now = this.ctx.currentTime
+    // Before a scheduled start (a jump or a cut on its way), the position still runs on the old start.
+    if (now < this.startCtxTime && !this.prevBase) return
+    const at = toHeard(song, this.position)
+    const start = toHeard(song, f.start)
+    const end = toHeard(song, f.end)
+    if (at < start - 0.3 || at >= end) return
+    // Heard time runs with the clock (cuts are skipped without a gap).
+    const t0 = now + Math.max(0, start - at)
+    const t1 = now + (end - at)
+    const g0 = at > start ? Math.max(0, Math.min(1, (end - at) / f.length)) : 1
+    for (const ch of this.channels.values()) {
+      if (!ch.fromSong || ch.group !== 'stem') continue
+      const g = ch.input.gain
+      if (typeof g.cancelAndHoldAtTime === 'function') g.cancelAndHoldAtTime(t0)
+      else g.cancelScheduledValues(t0)
+      g.setValueAtTime(g0, t0)
+      g.linearRampToValueAtTime(0, t1)
+      // A jump on its way: the fade runs until it lands, and the tracks are back at full level there.
+      const jump = this.pendingJump
+      if (jump && jump.when < t1) {
+        if (typeof g.cancelAndHoldAtTime === 'function') g.cancelAndHoldAtTime(jump.when)
+        else g.cancelScheduledValues(jump.when)
+        g.setValueAtTime(1, jump.when)
+      }
+    }
+    this.fadeOutScheduled = true
+  }
+
   private tick() {
     if (!this.playing || !this.song) return
     if (this.pendingJump && this.ctx.currentTime >= this.pendingJump.when) {
       this.pendingJump = null
+      // Landed: the fade-out applies (again) if the song plays into it from here.
+      this.fadeOutScheduled = false
+      this.armFade(this.position)
       this.prevBase = null
       this.lastTickPos = null
       this.emit()
@@ -1247,10 +1346,14 @@ export class Engine {
       this.handoffListeners.forEach((fn) => fn())
       return
     }
-    if (!this.loop && this.position >= songEnd(this.song)) {
+    this.scheduleFadeOut()
+    if (!this.loop && !this.pendingJump && this.position >= this.endOfSong()) {
+      const end = this.endOfSong()
       this.stopSources()
+      this.resetStemFades()
       this.playing = false
-      this.pausedPos = songEnd(this.song)
+      this.pausedPos = end
+      this.atEnd = true
       this.cancelFade()
       this.sendMidi([0xfc])
       this.emit()

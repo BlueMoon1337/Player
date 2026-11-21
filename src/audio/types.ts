@@ -7,6 +7,11 @@ export interface Section {
   start: number
   /** Cut: its music is left out of the arrangement, and the song plays that much shorter (arrangement.ts). */
   skip?: boolean
+  /**
+   * Fade Out: the song fades out over this many seconds, ending at the end of this section, and
+   * stops there (arrangement.ts). Only the first section with one counts.
+   */
+  fadeOut?: number
 }
 
 export interface Stem {
