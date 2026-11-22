@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { ConsoleState, DesktopAPI, ImportProgress, MenuCommand } from '../src/platform/types'
+import type { ConsoleState, DesktopAPI, ImportProgress, LumenState, MenuCommand } from '../src/platform/types'
 
 const api: DesktopAPI = {
   platform: process.platform,
@@ -97,6 +97,18 @@ const api: DesktopAPI = {
     setMuted: (muted) => ipcRenderer.invoke('console:set-muted', muted),
     search: () => ipcRenderer.invoke('console:search'),
     forget: (name) => ipcRenderer.invoke('console:forget', name),
+  },
+  lumen: {
+    state: () => ipcRenderer.invoke('lumen:state'),
+    onState: (cb) => {
+      const listener = (_e: Electron.IpcRendererEvent, s: LumenState) => cb(s)
+      ipcRenderer.on('lumen:state', listener)
+      return () => {
+        ipcRenderer.removeListener('lumen:state', listener)
+      }
+    },
+    setLooking: (on) => void ipcRenderer.invoke('lumen:set-looking', on),
+    play: (what) => ipcRenderer.invoke('lumen:play', what),
   },
 }
 

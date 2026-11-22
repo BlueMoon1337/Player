@@ -237,6 +237,14 @@ export function SettingsDialog(p: Props) {
         <Row title="MIDI Out" desc="Send MIDI start, stop and a program change for each song">
           <Switch label="MIDI Out" on={s.midiOut} set={(v) => setSetting('midiOut', v)} />
         </Row>
+        {desktop && (
+          <Row
+            title="Lumen Boxes"
+            desc="Random Countdown before the songs and Outro after them, played in Lumen on this computer or the network"
+          >
+            <Switch label="Lumen Boxes" on={s.lumenBoxes} set={(v) => setSetting('lumenBoxes', v)} />
+          </Row>
+        )}
         <Row title="Start Pad Player with Songs" desc="The pad fades in, in the song’s key, when a song begins to play">
           <Switch label="Start Pad Player with Songs" on={p.autoPad} set={p.setAutoPad} />
         </Row>

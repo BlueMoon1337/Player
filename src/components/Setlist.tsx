@@ -4,6 +4,7 @@ import type { SongEnd, SongEndSetting } from '../platform/types'
 import { SONG_DRAG } from '../library/store'
 import { type MenuEntry, showContextMenu } from './Ask'
 import { Popover } from './Popover'
+import { LumenBox } from './LumenBoxes'
 
 interface Props {
   /** The current setlist's songs, in order. */
@@ -330,6 +331,7 @@ export function Setlist(p: Props) {
 
   return (
     <div className="setlist" {...dropProps}>
+      <LumenBox what="random-countdown" />
       {songs.map((s, i) => (
         <div
           key={`${s.id}-${i}`}
@@ -352,6 +354,7 @@ export function Setlist(p: Props) {
       {songs.length === 0 && (
         <div className="setlist-empty">This setlist is empty. Open the Setlists menu to add songs, or drag them in.</div>
       )}
+      <LumenBox what="outro" />
       <button
         className={`song-card add ${dropClass(songs.length)}`}
         onClick={() => (onImportClick ? onImportClick() : input.current?.click())}

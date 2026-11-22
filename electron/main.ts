@@ -27,6 +27,7 @@ import { importPads } from './pads'
 import { CUE_LANGUAGES, type CueLanguage, cleanPhrase, renderCues } from './cues'
 import { type ExportFormat, exportApp, exportFile, exportFormats } from './selfExport'
 import { ConsoleLink, isTarget } from './console'
+import { LumenLink } from './lumen'
 
 /** Where spoken cues are kept: they're made by this computer's voices, so not in the library. */
 const cuesRoot = () => path.join(app.getPath('userData'), 'cues')
@@ -76,6 +77,8 @@ let win: BrowserWindow | null = null
 let library: Library
 /** The console button's link to an X32 on the local network (see console.ts). */
 let consoleLink: ConsoleLink
+/** The Random Countdown and Outro boxes' link to Lumen on the local network (see lumen.ts). */
+let lumenLink: LumenLink
 let active = false
 let quitConfirmed = false
 let sleepBlocker: number | null = null
@@ -599,6 +602,13 @@ function registerIpc() {
   handle('console:search', () => consoleLink.search())
   handle('console:forget', (name: unknown) => consoleLink.forget(consoleName(name)))
 
+  handle('lumen:state', () => lumenLink.state())
+  handle('lumen:set-looking', (on: unknown) => lumenLink.setLooking(on === true))
+  handle('lumen:play', (what: unknown) => {
+    if (what !== 'random-countdown' && what !== 'outro') throw new Error('Expected random-countdown or outro')
+    return lumenLink.play(what)
+  })
+
   ipcMain.on('app:active', (e, on: unknown) => {
     if (trusted(e)) setActive(on === true)
   })
@@ -666,12 +676,14 @@ if (!app.requestSingleInstanceLock()) {
     consoleLink = new ConsoleLink(path.join(app.getPath('userData'), 'consoles.json'), (s) =>
       win?.webContents.send('console:state', s),
     )
+    lumenLink = new LumenLink((s) => win?.webContents.send('lumen:state', s))
     registerAppProtocol()
     setupPermissions()
     registerIpc()
     buildMenu()
     createWindow()
     consoleLink.start()
+    lumenLink.start()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
@@ -680,7 +692,10 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     quitting = true
   })
-  app.on('will-quit', () => consoleLink?.stop())
+  app.on('will-quit', () => {
+    consoleLink?.stop()
+    lumenLink?.stop()
+  })
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()
   })

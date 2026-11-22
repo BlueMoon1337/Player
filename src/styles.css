@@ -3349,3 +3349,36 @@ button.smap-btn:hover {
   color: #5d5d63;
 }
 
+
+/* The Random Countdown and Outro boxes (Lumen), at either end of the song list. */
+.lumen-box .song-card-main {
+  border-style: dashed;
+}
+.lumen-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border-radius: 5px;
+  background: var(--panel-2);
+  color: var(--accent);
+}
+.lumen-box.unavailable .song-card-main {
+  cursor: default;
+  opacity: 0.6;
+}
+.lumen-box.unavailable .lumen-icon {
+  color: var(--muted);
+}
+.lumen-status {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lumen-box.played .lumen-status {
+  color: #4cc38a;
+}
+.lumen-box.failed .lumen-status {
+  color: #ff6b6b;
+}

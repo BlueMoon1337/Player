@@ -236,6 +236,38 @@ export interface ConsoleState {
   searching: boolean
 }
 
+// ----------------------------------------------- Lumen (the presentation app) on the network
+
+/** What the Random Countdown and Outro boxes ask Lumen to play. */
+export type LumenWhat = 'random-countdown' | 'outro'
+
+export interface LumenState {
+  /** The Lumen the boxes use (one that lets Player play, else any), or null when none answered. */
+  lumen: {
+    /** The computer it's on. */
+    name: string
+    /** It has started, and said what it has. */
+    ready: boolean
+    /** Lumen lets Player play (Timers ▸ Countdown Videos ▸ "Player can play the countdown and outro"). */
+    allowed: boolean
+    countdowns: number
+    /** The active outro's name; null when Lumen has none. */
+    outro: string | null
+  } | null
+  /** Other copies of Lumen answering too. */
+  others: number
+  /** macOS (Local Network privacy) refused to let Player reach the network. */
+  blocked: boolean
+}
+
+export interface LumenPlayResult {
+  ok: boolean
+  /** Why not, when it didn't play. */
+  message: string | null
+  /** The computer whose Lumen played it. */
+  lumen?: string
+}
+
 /** A strip offered in the console button's picker, with its scribble-strip name. */
 export interface ConsoleStrip {
   target: ConsoleTarget
@@ -334,6 +366,14 @@ export interface DesktopAPI {
     search(): Promise<void>
     /** Forgets a console and what it was linked to. */
     forget(consoleName: string): Promise<void>
+  }
+  /** Lumen, the presentation app: the Random Countdown and Outro boxes in the song list. */
+  lumen: {
+    state(): Promise<LumenState>
+    onState(cb: (s: LumenState) => void): () => void
+    /** Look for Lumen (while the boxes show) or stop. */
+    setLooking(on: boolean): void
+    play(what: LumenWhat): Promise<LumenPlayResult>
   }
 }
 

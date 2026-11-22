@@ -27,8 +27,9 @@ mac:
   extendInfo:
     # Only used if you click "Show all audio devices" to list interfaces by name.
     NSMicrophoneUsageDescription: Player asks for audio access only to list your audio interfaces by name. It never records.
-    # The console button finds X32 mixing consoles on the local network and mutes a channel on one.
-    NSLocalNetworkUsageDescription: Player looks for your mixing console on the local network, so the console button can mute and unmute a channel on it.
+    # The console button finds X32 mixing consoles on the local network and mutes a channel on one;
+    # the Random Countdown and Outro boxes find Lumen there.
+    NSLocalNetworkUsageDescription: Player looks for your mixing console and for Lumen on the local network, so the console button can mute a channel and the Lumen boxes can play a countdown or the outro.
 
 win:
   target:

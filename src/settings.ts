@@ -42,6 +42,8 @@ export interface Settings {
   busOutputs: Record<string, string>
   /** Settings ▸ Buses: buses given another name. */
   busNames: Record<string, string>
+  /** Random Countdown and Outro boxes at the ends of the song list, which play them in Lumen (desktop). */
+  lumenBoxes: boolean
 }
 
 const DEFAULTS: Settings = {
@@ -58,6 +60,7 @@ const DEFAULTS: Settings = {
   faderDefault80: false,
   powerSaver: false,
   midiOut: true,
+  lumenBoxes: true,
   trackBuses: {},
   busOutputs: {},
   busNames: {},
