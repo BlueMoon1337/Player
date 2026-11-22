@@ -596,6 +596,7 @@ function registerIpc() {
     return consoleLink.link(consoleName(name), target === null ? null : { kind: target.kind, number: target.number })
   })
   handle('console:set-muted', (muted: unknown) => consoleLink.setMuted(muted === true))
+  handle('console:search', () => consoleLink.search())
   handle('console:forget', (name: unknown) => consoleLink.forget(consoleName(name)))
 
   ipcMain.on('app:active', (e, on: unknown) => {

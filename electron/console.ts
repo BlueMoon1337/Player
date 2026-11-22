@@ -4,6 +4,10 @@
 // with no value reads it, with a value sets it. `/xinfo` makes it say who it is, and `/xremote`
 // makes it push every change to us for the next 10 seconds. This is the same protocol FaderLink
 // uses; Player talks to the console directly, so FaderLink doesn't have to be running.
+//
+// Player only looks for consoles while it has a reason to: a console button is set up (so its
+// console is found again, at whatever address it's on now), or the user is setting one up (a
+// search, started by the picker). Otherwise it sends nothing on the network.
 
 import dgram from 'node:dgram'
 import fs from 'node:fs'
@@ -17,6 +21,8 @@ const TICK_MS = 2000
 const GONE_MS = 7000
 /** Every address on the subnet is asked this often while no console is found (broadcasts may be filtered). */
 const SWEEP_MS = 30_000
+/** How long a search started from the Console Button picker lasts (it's renewed while the picker is open). */
+const SEARCH_MS = 60_000
 
 // ------------------------------------------------------------------------------- OSC
 
@@ -150,6 +156,8 @@ export class ConsoleLink {
   private label = ''
   private muted: boolean | null = null
   private blocked = false
+  /** Until when a search asked for by the user runs (see search()). */
+  private searchUntil = 0
   private lastSent = ''
   /** Gathers replies while the picker asks a console for its strip names. */
   private collector: ((address: string, m: { address: string; args: (number | string)[] }) => void) | null = null
@@ -190,16 +198,32 @@ export class ConsoleLink {
       button: b?.target
         ? { console: b.name, target: b.target, label: this.label, online, muted: online ? this.muted : null }
         : null,
+      models: Object.fromEntries([...this.online].map(([name, o]) => [name, o.model])),
       newConsole: this.newConsole,
       blocked: this.blocked && this.online.size === 0,
+      searching: this.searching(),
     }
+  }
+
+  /**
+   * Looks for consoles for the next minute, every address on the network included: the Console
+   * Button picker asks for this while it's open, when no button is set up yet.
+   */
+  search() {
+    const first = !this.searching()
+    this.searchUntil = Date.now() + SEARCH_MS
+    if (first) {
+      this.lastSweep = 0
+      this.tick()
+    }
+    this.emit()
   }
 
   async link(name: string, target: ConsoleTarget | null) {
     let c = this.consoles.find((x) => x.name === name)
     if (!c) {
       const seen = this.online.get(name) ?? (this.newConsole?.name === name ? this.newConsole : null)
-      if (!seen) throw new Error(`Console “${name}” isn't known`)
+      if (!seen) throw new Error(`Console “${name}” isn't on the network`)
       c = { name, model: seen.model, address: seen.address, lastSeen: Date.now(), target: null }
       this.consoles.push(c)
     }
@@ -296,6 +320,12 @@ export class ConsoleLink {
       if (!this.buttonOnline()) this.muted = null
     }
 
+    // Nothing to look for: no button, and no one setting one up. Stay quiet on the network.
+    if (!this.hasButton() && !this.searching()) {
+      if (changed) this.emit()
+      return
+    }
+
     // Who's there: every remembered console directly, then a broadcast on each network.
     // (Only the broadcasts' errors count as "blocked": a remembered console that's switched
     // off can make its own address fail too.)
@@ -311,6 +341,15 @@ export class ConsoleLink {
 
     this.pollButton(this.ticks % 4 === 1)
     if (changed) this.emit()
+  }
+
+  /** A button is set up: its console is looked for all the time. */
+  private hasButton() {
+    return this.consoles.some((c) => c.target)
+  }
+
+  private searching() {
+    return Date.now() < this.searchUntil
   }
 
   private buttonOnline() {
@@ -346,7 +385,9 @@ export class ConsoleLink {
           known.model = String(model ?? known.model)
           this.save()
         }
-      } else if (!this.newConsole && !this.asked.has(name)) {
+      } else if (this.hasButton() && !this.searching() && !this.newConsole && !this.asked.has(name)) {
+        // Another console, with a button already set up: ask about it once. (While the user is
+        // setting the button up, the picker shows the consoles found instead.)
         this.asked.add(name)
         this.newConsole = { name, model: String(model ?? ''), address: from }
       }

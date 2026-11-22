@@ -95,6 +95,7 @@ const api: DesktopAPI = {
     strips: (name) => ipcRenderer.invoke('console:strips', name),
     link: (name, target) => ipcRenderer.invoke('console:link', name, target),
     setMuted: (muted) => ipcRenderer.invoke('console:set-muted', muted),
+    search: () => ipcRenderer.invoke('console:search'),
     forget: (name) => ipcRenderer.invoke('console:forget', name),
   },
 }

@@ -213,6 +213,8 @@ export interface ConsoleState {
   consoles: KnownConsole[]
   /** Names of the consoles answering on the network now. */
   online: string[]
+  /** Each online console's model ("X32C"…), by name. */
+  models: Record<string, string>
   /**
    * The console button: the linked console that's online (else the one seen most recently).
    * Null when no console is linked, and the Master strip looks as it always has.
@@ -230,6 +232,8 @@ export interface ConsoleState {
   newConsole: { name: string; model: string; address: string } | null
   /** macOS (Local Network privacy) refused to let Player reach the network. */
   blocked: boolean
+  /** Looking for consoles because the user is setting up the button (see search()). */
+  searching: boolean
 }
 
 /** A strip offered in the console button's picker, with its scribble-strip name. */
@@ -323,6 +327,11 @@ export interface DesktopAPI {
     link(consoleName: string, target: ConsoleTarget | null): Promise<void>
     /** Mutes or unmutes the button's strip on its console. */
     setMuted(muted: boolean): Promise<void>
+    /**
+     * Looks for consoles for the next minute (renew it to keep looking). Without a button set up,
+     * Player looks for consoles only while a search is on.
+     */
+    search(): Promise<void>
     /** Forgets a console and what it was linked to. */
     forget(consoleName: string): Promise<void>
   }

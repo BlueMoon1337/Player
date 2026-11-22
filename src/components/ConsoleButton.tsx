@@ -7,7 +7,8 @@ import { type MenuEntry, confirmDialog, isAsking, showContextMenu } from './Ask'
  * The console button above the Master fader: mutes and unmutes one channel, bus or DCA group on
  * a Behringer / Midas X32 found on the local network (the main process does the talking; see
  * electron/console.ts). With nothing linked there's no button, and the Master strip looks as it
- * always has. Desktop only.
+ * always has, and Player doesn't look for consoles at all until the button is set up from the
+ * Master strip's right-click menu. Desktop only.
  */
 
 // ------------------------------------------------------------------------- state
@@ -95,19 +96,20 @@ export function ConsoleButton() {
 export function consoleMenu(s: ConsoleState | null): MenuEntry[] {
   if (!desktop || !s) return []
   const b = s.button
-  // The console to link: the button's own, else one on the network now.
-  const name = b?.console ?? s.online[0]
+  // The console to link: the button's own, else one on the network now, else (no button yet)
+  // the picker looks for one.
+  const name = b?.console ?? s.online[0] ?? null
   const known = s.consoles.find((c) => c.name === name)
-  const model = known?.model ?? s.newConsole?.model ?? ''
-  const online = !!name && s.online.includes(name)
+  // Changing a button means reaching its console; setting one up can start by looking for it.
+  const offline = !!b && !s.online.includes(b.console)
   const items: MenuEntry[] = [
     {
       label: b ? 'Change Console Button…' : 'Console Button…',
-      disabled: !online,
-      hint: online ? undefined : 'no console',
+      disabled: offline,
+      hint: offline ? 'not on the network' : undefined,
       onClick: async () => {
-        const target = await pickConsoleStrip(name!, model, b?.target ?? null)
-        if (target !== undefined) await desktop!.console.link(name!, target)
+        const picked = await pickConsoleStrip(name, b?.target ?? null)
+        if (picked) await desktop!.console.link(picked.name, picked.target)
       },
     },
   ]
@@ -152,9 +154,9 @@ export function ConsoleWatcher({ playing }: { playing: boolean }) {
           confirmLabel: 'Choose…',
           cancelLabel: 'Not Now',
         })
-        const target = yes ? await pickConsoleStrip(found.name, found.model, null) : null
+        const picked = yes ? await pickConsoleStrip(found.name, null) : undefined
         // Remembered either way, so Player doesn't ask again.
-        await desktop!.console.link(found.name, target ?? null)
+        await desktop!.console.link(found.name, picked?.name === found.name ? picked.target : null)
       } catch {
         // It went off the network; it'll be asked about next time it's seen.
       } finally {
@@ -170,13 +172,16 @@ export function ConsoleWatcher({ playing }: { playing: boolean }) {
 
 // ------------------------------------------------------------------------ picker
 
+/** The console and strip chosen: a strip, or null for "nothing". */
+type Picked = { name: string; target: ConsoleTarget | null }
+
 interface Pending {
-  consoleName: string
-  model: string
+  /** The console to choose a strip on; null to look for one first. */
+  consoleName: string | null
   current: ConsoleTarget | null
   seq: number
-  /** A strip, null for "nothing", undefined if cancelled. */
-  resolve: (t: ConsoleTarget | null | undefined) => void
+  /** What was chosen, undefined if cancelled. */
+  resolve: (p: Picked | undefined) => void
 }
 
 let pending: Pending | null = null
@@ -187,13 +192,19 @@ const setPending = (p: Pending | null) => {
   pickerListeners.forEach((fn) => fn())
 }
 
-/** Asks which strip on a console the button should mute: a strip, null for none, undefined if cancelled. */
-export function pickConsoleStrip(consoleName: string, model: string, current: ConsoleTarget | null) {
-  return new Promise<ConsoleTarget | null | undefined>((resolve) => {
+/**
+ * Asks which strip on a console the button should mute (with `consoleName` null, on the first
+ * console found by looking for one): the console and strip, or undefined if cancelled.
+ */
+export function pickConsoleStrip(consoleName: string | null, current: ConsoleTarget | null) {
+  return new Promise<Picked | undefined>((resolve) => {
     pending?.resolve(undefined)
-    setPending({ consoleName, model, current, seq: ++seq, resolve })
+    setPending({ consoleName, current, seq: ++seq, resolve })
   })
 }
+
+/** How long the picker looks for a console before saying none was found. */
+const LOOK_MS = 15_000
 
 export function ConsoleLinkHost() {
   const p = useSyncExternalStore(
@@ -213,24 +224,56 @@ const GROUPS: { kind: ConsoleTarget['kind']; title: string }[] = [
 ]
 
 function PickerBox({ p }: { p: Pending }) {
+  const s = useConsoleState()
   const [strips, setStrips] = useState<ConsoleStrip[] | null>(null)
   const [error, setError] = useState('')
   const [choice, setChoice] = useState(p.current ? keyOf(p.current) : '')
+  // The console: the one asked for, else the first one found once looking.
+  const [found, setFound] = useState<string | null>(p.consoleName)
+  const name = found ?? s?.online[0] ?? null
+  const model = (name && (s?.models[name] ?? s?.consoles.find((c) => c.name === name)?.model)) || ''
 
-  const answer = (t: ConsoleTarget | null | undefined) => {
+  const answer = (picked: Picked | undefined) => {
     if (pending === p) setPending(null)
-    p.resolve(t)
+    p.resolve(picked)
   }
   const ok = () => {
-    const hit = strips?.find((s) => keyOf(s.target) === choice)
-    answer(hit ? hit.target : null)
+    if (!name || !strips) return
+    const hit = strips.find((x) => keyOf(x.target) === choice)
+    answer({ name, target: hit ? hit.target : null })
   }
 
+  // Look for consoles while the picker is open (Player doesn't otherwise, until a button is set up).
   useEffect(() => {
-    desktop!.console.strips(p.consoleName).then(setStrips, () =>
-      setError(`Couldn’t reach “${p.consoleName}”. Check it’s on and on the same network, then try again.`),
+    void desktop!.console.search()
+    const renew = setInterval(() => void desktop!.console.search(), 30_000)
+    return () => clearInterval(renew)
+  }, [])
+
+  // No console found in a while: say so (it keeps looking, and shows one that turns up).
+  useEffect(() => {
+    if (name) return
+    const t = setTimeout(
+      () =>
+        setError(
+          s?.blocked
+            ? 'macOS is blocking Player from the local network. Allow Player in System Settings ▸ Privacy & Security ▸ Local Network, then try again.'
+            : 'No console found yet. Check the X32 is on and on the same network as this computer. Player keeps looking while this is open.',
+        ),
+      LOOK_MS,
     )
-  }, [p.consoleName])
+    return () => clearTimeout(t)
+  }, [name, s?.blocked])
+
+  useEffect(() => {
+    if (!name) return
+    setFound(name) // stay with this console, even if another one answers too
+    setError('')
+    setStrips(null)
+    desktop!.console.strips(name).then(setStrips, () =>
+      setError(`Couldn’t reach “${name}”. Check it’s on and on the same network, then try again.`),
+    )
+  }, [name])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -249,10 +292,14 @@ function PickerBox({ p }: { p: Pending }) {
       <div className="dialog ask console-link" role="dialog" aria-modal="true" aria-label="Console Button">
         <h3 className="ask-title">Console Button</h3>
         <p className="ask-message">
-          Choose what the button above the Master fader mutes and unmutes on {modelName(p.model)} “{p.consoleName}”.
+          {name
+            ? <>Choose what the button above the Master fader mutes and unmutes on {modelName(model)} “{name}”.</>
+            : 'The button above the Master fader can mute and unmute a channel, bus or DCA group on a Behringer or Midas X32 on this network.'}
         </p>
         {error ? (
           <p className="ask-message console-error">{error}</p>
+        ) : !name ? (
+          <p className="ask-message">Looking for consoles on the network…</p>
         ) : !strips ? (
           <p className="ask-message">Reading names from the console…</p>
         ) : (
