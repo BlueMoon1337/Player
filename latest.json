@@ -1,11 +1,11 @@
 {
-  "version": "1.4.7",
-  "notes": "- Random Countdown and Outro boxes that play them in Lumen\n- publish-package: notes from a version raised in a feature commit; --force keeps the old zips",
-  "date": "2026-11-22T23:24:33.211Z",
+  "version": "1.4.8",
+  "notes": "- Fade Out Music box: fades out the music playing in Lumen\n- Settings > Console: the console button and remembered consoles",
+  "date": "2026-11-22T23:38:13.268Z",
   "interface": {
-    "file": "Player-1.4.7-update.zip",
-    "sha512": "aa5752bb076fa397b1042735879c8794fd05725342c1c0d6f5765cb4206dcb788e1765d4af286caf394e065057c713aade4543b8297e87197e9968efc91f87b6",
+    "file": "Player-1.4.8-update.zip",
+    "sha512": "ea387a6c8e7b00e366eee0c2019baf12c8ebd7c6278fa5fdd6d371fdc6fe360657ca58fde545c446c851425cdf8384fe713c3cacb348fc115d341fad952d8ad8",
     "electron": "44.7.0",
-    "signature": "J99QEwH4LkVPRRqXcQVcY2iiL1KZuILapJ09wGyS2NejCxMmEl4sEyvfnCCil9swPkh+iqv6tgnhy2rNgEv2CA=="
+    "signature": "l8/xcqGGpQEm5ho6aIzgrFENVdQM8AW/JBgm/hikjKbfg7qMaYCdYF7ioUdkB1l8uLUVA3UmbGl5ReZDQmpaAQ=="
   }
 }
