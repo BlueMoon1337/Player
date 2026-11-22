@@ -43,9 +43,13 @@ function newer(a, b) {
 function changes(since) {
   if (process.env.UPDATE_NOTES) return process.env.UPDATE_NOTES
   try {
-    // From the previous version's "Version x.y.z" commit (else the one before this version's).
+    // From the previous version's "Version x.y.z" commit, else the commit that put that version in
+    // package.json (a feature commit that raised the version itself), else the "Version" commit
+    // before this version's.
+    const bumped = (v) =>
+      git(['log', '--reverse', '--format=%H', `-S"version": "${v}"`, 'HEAD', '--', 'package.json']).split('\n')[0] ?? ''
     const from = since
-      ? git(['log', '-1', '--format=%H', '--grep', `^Version ${since.replace(/\./g, '\\.')}$`, 'HEAD'])
+      ? git(['log', '-1', '--format=%H', '--grep', `^Version ${since.replace(/\./g, '\\.')}$`, 'HEAD']) || bumped(since)
       : (git(['log', '--format=%H %s', '--grep', '^Version [0-9]', 'HEAD'])
           .split('\n')
           .find((l) => l && !l.endsWith(` ${version}`))
@@ -78,10 +82,12 @@ async function toBranch() {
     // The previous version's zip stays: GitHub's file address can serve the old latest.json for a
     // few minutes, and a copy reading it must still find the zip it names. Older ones go (they
     // stay in the branch's history).
+    // (Publishing the same version again, with --force, keeps them all: the version before is
+    // still the one a stale latest.json may name.)
     const versionOf = (f) => /^Player-(.+)-update\.zip$/.exec(f)?.[1]
     for (const f of fs.readdirSync(dir)) {
       const v = versionOf(f)
-      if (v && v !== previous && v !== version) fs.rmSync(path.join(dir, f))
+      if (v && previous !== version && v !== previous && v !== version) fs.rmSync(path.join(dir, f))
     }
     fs.copyFileSync(zip, path.join(dir, entry.file))
     const manifest = { version, notes: changes(previous), date: new Date().toISOString(), interface: entry }
