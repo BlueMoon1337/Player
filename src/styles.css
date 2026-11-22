@@ -3382,3 +3382,40 @@ button.smap-btn:hover {
 .lumen-box.failed .lumen-status {
   color: #ff6b6b;
 }
+
+/* Settings ▸ Console */
+.console-buttons {
+  align-items: center;
+}
+.console-state {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid #6b6b72;
+}
+.console-state.on {
+  background: #34c759;
+  border-color: #34c759;
+}
+.console-state.muted {
+  background: #ff3b30;
+  border-color: #ff3b30;
+}
+.set-section-title {
+  padding: 14px 0 2px;
+  color: #98989f;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.console-empty {
+  margin: 10px 0 16px;
+  color: #98989f;
+  font-size: 13.5px;
+}
+.console-error-line {
+  margin: 0 0 10px;
+  color: #ff6b6b;
+  font-size: 13px;
+}

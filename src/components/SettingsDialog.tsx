@@ -1,12 +1,14 @@
 import { type ReactNode, useEffect, useState } from 'react'
 import type { Engine, EngineState, JumpMode } from '../audio/engine'
 import { desktop } from '../platform'
-import type { ExportFormat } from '../platform/types'
+import type { ConsoleTarget, ExportFormat } from '../platform/types'
 import { type ClickSound, type CueLanguage, setSetting, useSettings } from '../settings'
 import { useAudioDevices } from './Panels'
 import { BusesTab, TracksTab } from './RoutingTabs'
+import { confirmDialog } from './Ask'
+import { modelName, pickConsoleStrip, targetLabel, useConsoleState } from './ConsoleButton'
 
-export type SettingsTab = 'general' | 'tracks' | 'buses' | 'about'
+export type SettingsTab = 'general' | 'tracks' | 'buses' | 'console' | 'about'
 
 interface Props {
   tab: SettingsTab
@@ -138,7 +140,148 @@ function AudioDeviceChoice({ engine, state }: { engine: Engine; state: EngineSta
   )
 }
 
-/** Settings, laid out like Playback's: General, Tracks, Buses and About. */
+/** When a console was last on the network, in words. */
+function seenAgo(at: number) {
+  if (!at) return 'not seen yet'
+  const min = Math.round((Date.now() - at) / 60_000)
+  if (min < 1) return 'seen just now'
+  if (min < 60) return `seen ${min} min ago`
+  const h = Math.round(min / 60)
+  if (h < 48) return `seen ${h} hour${h === 1 ? '' : 's'} ago`
+  return `seen ${new Date(at).toLocaleDateString()}`
+}
+
+/**
+ * Settings ▸ Console: the console button above the Master fader (what it mutes, on which console,
+ * and whether it's there now) and the consoles Player remembers. The same as right-clicking the
+ * button or the Master strip, laid out.
+ */
+function ConsoleTab() {
+  const s = useConsoleState()
+  const [error, setError] = useState<string | null>(null)
+  if (!s) return null
+  const b = s.button
+  const online = (name: string) => s.online.includes(name)
+  const run = (f: () => Promise<unknown>) => {
+    setError(null)
+    f().catch((e: Error) => setError(e.message))
+  }
+  const setUp = (name: string | null, current: ConsoleTarget | null) =>
+    run(async () => {
+      const picked = await pickConsoleStrip(name, current)
+      if (picked) await desktop!.console.link(picked.name, picked.target)
+    })
+  const buttonName = b ? b.label || targetLabel(b.target) : ''
+  const known = b ? s.consoles.find((c) => c.name === b.console) : undefined
+  const state = !b
+    ? null
+    : !b.online
+      ? s.blocked
+        ? 'macOS is blocking Player from the local network: allow Player in System Settings ▸ Privacy & Security ▸ Local Network.'
+        : `${b.console} isn’t on the network now, so the button is greyed out. It comes back when the console does.`
+      : b.muted === null
+        ? `Asking ${b.console}…`
+        : `It’s ${b.muted ? 'muted' : 'on'} at the console now.`
+  return (
+    <div className="set-columns">
+      <div className="set-col">
+        <Row
+          title="Console Button"
+          desc={
+            b ? (
+              <>
+                Mutes and unmutes <b>{buttonName}</b>
+                {b.label ? ` (${targetLabel(b.target)})` : ''} on {modelName(known?.model ?? '')} “{b.console}”. {state}
+              </>
+            ) : (
+              'A button above the Master fader that mutes and unmutes a channel, mix bus or DCA group on a Behringer or Midas X32 on this network. Until it’s set up, Player doesn’t look for consoles.'
+            )
+          }
+        >
+          {b ? (
+            <div className="set-buttons console-buttons">
+              <span className={`console-state ${!b.online ? 'offline' : b.muted ? 'muted' : b.muted === false ? 'on' : ''}`} aria-hidden="true" />
+              <button className="small" disabled={!b.online} title={b.online ? undefined : 'The console has to be on the network'} onClick={() => setUp(b.console, b.target)}>
+                Change…
+              </button>
+              <button className="small" onClick={() => run(() => desktop!.console.link(b.console, null))}>
+                Remove
+              </button>
+            </div>
+          ) : (
+            <button className="small primary" onClick={() => setUp(s.online[0] ?? null, null)}>
+              Set Up…
+            </button>
+          )}
+        </Row>
+        {error && <p className="console-error-line">{error}</p>}
+        <Row
+          title="Network"
+          desc={
+            s.blocked
+              ? 'macOS is blocking Player from the local network. Allow Player in System Settings ▸ Privacy & Security ▸ Local Network, then quit and reopen Player.'
+              : b
+                ? 'Player looks for the button’s console every few seconds, by its name, so a new IP address doesn’t matter.'
+                : s.searching
+                  ? 'Looking for consoles…'
+                  : 'Player isn’t looking for consoles: it sends nothing on the network until a button is set up.'
+          }
+        >
+          <span className="set-value">{s.online.length ? `${s.online.length} console${s.online.length === 1 ? '' : 's'} found` : s.blocked ? 'Blocked' : '—'}</span>
+        </Row>
+      </div>
+      <div className="set-col">
+        <div className="set-section-title">Remembered Consoles</div>
+        {s.consoles.length === 0 ? (
+          <p className="console-empty">None yet. A console is remembered once the button is set up on it.</p>
+        ) : (
+          s.consoles.map((c) => (
+            <Row
+              key={c.name}
+              title={c.name}
+              desc={
+                <>
+                  {modelName(c.model)} at {c.address} · {online(c.name) ? 'on the network' : seenAgo(c.lastSeen)}
+                  <br />
+                  {c.target ? `Button: ${b?.console === c.name && b.label ? `${b.label} (${targetLabel(c.target)})` : targetLabel(c.target)}` : 'No button'}
+                </>
+              }
+            >
+              <div className="set-buttons console-buttons">
+                <button
+                  className="small"
+                  disabled={!online(c.name)}
+                  title={online(c.name) ? `Choose what the button mutes on ${c.name}` : 'The console has to be on the network'}
+                  onClick={() => setUp(c.name, c.target)}
+                >
+                  {c.target ? 'Change…' : 'Use for Button…'}
+                </button>
+                <button
+                  className="small destructive"
+                  onClick={() =>
+                    run(async () => {
+                      const ok = await confirmDialog({
+                        title: `Forget “${c.name}”?`,
+                        message: 'Player stops remembering this console and what its button was set to.',
+                        confirmLabel: 'Forget',
+                        danger: true,
+                      })
+                      if (ok) await desktop!.console.forget(c.name)
+                    })
+                  }
+                >
+                  Forget…
+                </button>
+              </div>
+            </Row>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Settings, laid out like Playback's: General, Tracks, Buses, Console and About. */
 export function SettingsDialog(p: Props) {
   const s = useSettings()
   const { tab, setTab } = p
@@ -283,7 +426,7 @@ export function SettingsDialog(p: Props) {
             }
             disabled={!p.exportPlayer.formats.length}
           >
-            <div className="set-buttons">
+            <div className="set-buttons console-buttons">
               {p.exportPlayer.formats.map((f) => (
                 <button key={f} className="small" disabled={p.exportPlayer!.busy} onClick={() => p.exportPlayer!.run(f)}>
                   {EXPORT_LABELS[f]}
@@ -339,6 +482,7 @@ export function SettingsDialog(p: Props) {
                 ['general', 'General'],
                 ['tracks', 'Tracks'],
                 ['buses', 'Buses'],
+                ...(desktop ? [['console', 'Console']] : []),
                 ['about', 'About'],
               ] as [SettingsTab, string][]
             ).map(([t, name]) => (
@@ -355,6 +499,7 @@ export function SettingsDialog(p: Props) {
           {tab === 'general' && general}
           {tab === 'tracks' && <TracksTab state={p.state} />}
           {tab === 'buses' && <BusesTab state={p.state} />}
+          {tab === 'console' && desktop && <ConsoleTab />}
           {tab === 'about' && about}
         </div>
       </div>
