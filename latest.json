@@ -1,11 +1,11 @@
 {
-  "version": "1.4.3",
-  "notes": "- Fade Out at any section: the song fades out over the end of a section and stops there (section menu ▸ Fade Out Here; drag the fade's handle to change its length). The click keeps going to the end of the section.",
-  "date": "2026-11-21T04:48:09.259Z",
+  "version": "1.4.4",
+  "notes": "- Fix: Overlap / Crossfade ring-out follows the arrangement, and Stop stops it",
+  "date": "2026-11-22T04:21:07.273Z",
   "interface": {
-    "file": "Player-1.4.3-update.zip",
-    "sha512": "7212affcf578f6980c91f4b7453edfb334ab23a0ce7ff6d9700ba03b9b0160419a6d5c8b3d57183a6bcbf8f1ea578fdbf24bc674d55ea0bd8427582fdce49622",
+    "file": "Player-1.4.4-update.zip",
+    "sha512": "829c75ba67f5dd344a6da869c2f9892933aa33bc9382a69665d351a1305407a45f43806f53aa5860fb18b39029e8ce0f3fc316086e98fc34f6fce2a54e16193f",
     "electron": "44.7.0",
-    "signature": "ClczWmlYCpSODlAqmQg6u7lMzu4k18R2pIOsbGtnlxkSrlIZVLhC414Pcf/UqUEQ1tiCf4rTdroIx+I5o0G2CA=="
+    "signature": "/h6Y9ffIafJDu0xWPK1cATyQnkmI5YA+HAqujzz1TLIFp+JxmXRkOcM6MNTUA0hQqgxd78+vGvzkB5NTn3DCBw=="
   }
 }
