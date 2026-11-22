@@ -1,11 +1,11 @@
 {
-  "version": "1.4.6",
-  "notes": "- The console button looks for consoles only once a button is set up (Console Button… on the Master strip's right-click menu finds one); without a button, Player sends nothing on the network",
-  "date": "2026-11-22T23:05:00.117Z",
+  "version": "1.4.7",
+  "notes": "- Random Countdown and Outro boxes that play them in Lumen\n- publish-package: notes from a version raised in a feature commit; --force keeps the old zips",
+  "date": "2026-11-22T23:24:33.211Z",
   "interface": {
-    "file": "Player-1.4.6-update.zip",
-    "sha512": "94360daa679688052f03ed406f5369a018cbb6c6f53621800fa0bb466df8212843b224c41501bb3a9d6b176c5e2899f652f898d14b9529b0ac514d642fd6d330",
+    "file": "Player-1.4.7-update.zip",
+    "sha512": "aa5752bb076fa397b1042735879c8794fd05725342c1c0d6f5765cb4206dcb788e1765d4af286caf394e065057c713aade4543b8297e87197e9968efc91f87b6",
     "electron": "44.7.0",
-    "signature": "L4nTEyuWnhU821gf79KuS0rv5Qf+vGI+h1cumYRZAJzAyxFj8Iil/t5JiryiSks4YEqE9AduUDVhlu9y+S/kDA=="
+    "signature": "J99QEwH4LkVPRRqXcQVcY2iiL1KZuILapJ09wGyS2NejCxMmEl4sEyvfnCCil9swPkh+iqv6tgnhy2rNgEv2CA=="
   }
 }
