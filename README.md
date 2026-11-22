@@ -7,6 +7,12 @@ A multitrack backing-track player for live worship and band use, in the spirit o
 ## Desktop features
 
 - **Song library on disk.** Imported stems are copied into `Documents/Player Library`. Each song gets its own folder holding its stems and a `song.json` with its settings and sections. Setlists are saved in `library.json`. Edits save automatically, and stems load from disk when you select a song. A deleted song is kept until the next launch so it can be undone (see [Deleting and Undo](#deleting-and-undo)).
+- **Console button.** A button above the Master fader that mutes and unmutes one channel, mix bus or DCA group on a Behringer or Midas X32 (an X32 Compact, say) on the local network, the way FaderLink talks to it.
+  - **New consoles.** The first time Player finds a console, it asks whether to link one of its strips. It never asks while audio is playing. **Choose…** lists the console's channels, buses and DCAs by their scribble-strip names; **Not Now** remembers the console without a button.
+  - **What the button shows.** It shows the strip's name, with a green dot when it's on and in red when it's muted. A change made at the console shows up on the button straight away. When the linked console isn't on the network, the button is greyed out. With nothing linked there's no button, and the Master strip looks as it always has.
+  - **Remembered consoles.** Consoles are remembered (in `consoles.json` in Player's settings folder) with what each one's button mutes. They're found by name, so a new IP address doesn't matter. If two linked consoles are on the network at once, the button stays with the one it has.
+  - **Changing the link.** Right-click the button or the Master strip to change what it mutes, remove the button, or forget a console.
+  - **Network permission.** The first time, macOS asks to let Player find devices on the local network: click **Allow**. If the button stays greyed out, turn Player on in System Settings ▸ Privacy & Security ▸ Local Network.
 - **Audio interface support.** In **Outputs**, choose the audio device. Every output the device exposes becomes routable: send any channel to Main 1/2, to another pair (Out 3/4, 5/6, …), or to a single output in mono. A typical setup sends click and guide to Out 3/4 for in-ears and tracks to Main for front-of-house, and there's a one-click preset for it. The chosen device is remembered and reconnected the next time it's plugged in.
 - **Built for live use.**
   - The display stays awake while audio is playing.

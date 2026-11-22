@@ -26,6 +26,7 @@ import { AUDIO_EXTENSIONS, importPaths } from './importer'
 import { importPads } from './pads'
 import { CUE_LANGUAGES, type CueLanguage, cleanPhrase, renderCues } from './cues'
 import { type ExportFormat, exportApp, exportFile, exportFormats } from './selfExport'
+import { ConsoleLink, isTarget } from './console'
 
 /** Where spoken cues are kept: they're made by this computer's voices, so not in the library. */
 const cuesRoot = () => path.join(app.getPath('userData'), 'cues')
@@ -73,6 +74,8 @@ protocol.registerSchemesAsPrivileged([
 
 let win: BrowserWindow | null = null
 let library: Library
+/** The console button's link to an X32 on the local network (see console.ts). */
+let consoleLink: ConsoleLink
 let active = false
 let quitConfirmed = false
 let sleepBlocker: number | null = null
@@ -582,6 +585,19 @@ function registerIpc() {
     await shell.openPath(library.songDir(id))
   })
 
+  const consoleName = (name: unknown) => {
+    if (typeof name !== 'string' || !name || name.length > 64) throw new Error('Expected a console name')
+    return name
+  }
+  handle('console:state', () => consoleLink.state())
+  handle('console:strips', (name: unknown) => consoleLink.strips(consoleName(name)))
+  handle('console:link', (name: unknown, target: unknown) => {
+    if (target !== null && !isTarget(target)) throw new Error('Expected a channel, bus or DCA')
+    return consoleLink.link(consoleName(name), target === null ? null : { kind: target.kind, number: target.number })
+  })
+  handle('console:set-muted', (muted: unknown) => consoleLink.setMuted(muted === true))
+  handle('console:forget', (name: unknown) => consoleLink.forget(consoleName(name)))
+
   ipcMain.on('app:active', (e, on: unknown) => {
     if (trusted(e)) setActive(on === true)
   })
@@ -646,11 +662,15 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(() => {
     library = new Library(libraryRoot())
     void emptyLibraryTrash()
+    consoleLink = new ConsoleLink(path.join(app.getPath('userData'), 'consoles.json'), (s) =>
+      win?.webContents.send('console:state', s),
+    )
     registerAppProtocol()
     setupPermissions()
     registerIpc()
     buildMenu()
     createWindow()
+    consoleLink.start()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
@@ -659,6 +679,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     quitting = true
   })
+  app.on('will-quit', () => consoleLink?.stop())
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()
   })

@@ -187,6 +187,57 @@ export interface FoundUpdate {
   date: string | null
 }
 
+// ------------------------------------------------- console button (Behringer / Midas X32)
+
+/** A strip on an X32 the console button can mute: input channel 1–32, mix bus 1–16 or DCA 1–8. */
+export interface ConsoleTarget {
+  kind: 'channel' | 'bus' | 'dca'
+  number: number
+}
+
+/** A console Player has seen on the network, remembered between launches. */
+export interface KnownConsole {
+  /** The console's network name, e.g. "X32C-08-4E-24". Unlike its address, it doesn't change. */
+  name: string
+  /** "X32C" for an X32 Compact, "X32" and so on. */
+  model: string
+  /** Where it was last found. */
+  address: string
+  /** When it was last seen (ms since 1970). */
+  lastSeen: number
+  /** What the console button mutes on this console; null when the user chose nothing. */
+  target: ConsoleTarget | null
+}
+
+export interface ConsoleState {
+  consoles: KnownConsole[]
+  /** Names of the consoles answering on the network now. */
+  online: string[]
+  /**
+   * The console button: the linked console that's online (else the one seen most recently).
+   * Null when no console is linked, and the Master strip looks as it always has.
+   */
+  button: {
+    console: string
+    target: ConsoleTarget
+    /** The strip's scribble-strip name on the console; '' until known, or if it has none. */
+    label: string
+    online: boolean
+    /** Muted on the console; null while it isn't known. */
+    muted: boolean | null
+  } | null
+  /** A console seen for the first time, waiting for the user to say whether to link it. */
+  newConsole: { name: string; model: string; address: string } | null
+  /** macOS (Local Network privacy) refused to let Player reach the network. */
+  blocked: boolean
+}
+
+/** A strip offered in the console button's picker, with its scribble-strip name. */
+export interface ConsoleStrip {
+  target: ConsoleTarget
+  label: string
+}
+
 export interface DesktopAPI {
   platform: string
   library: {
@@ -262,6 +313,19 @@ export interface DesktopAPI {
   onMenu(cb: (cmd: MenuCommand) => void): () => void
   /** Player is closing: save what's waiting; it closes when the promise settles (or after a few seconds). */
   onFlush(cb: () => Promise<void>): () => void
+  /** The console button: mutes a channel, bus or DCA on an X32 found on the local network. */
+  console: {
+    state(): Promise<ConsoleState>
+    onState(cb: (s: ConsoleState) => void): () => void
+    /** A console's channels, buses and DCAs with their names; it has to be online. */
+    strips(consoleName: string): Promise<ConsoleStrip[]>
+    /** Links the button to a strip on a console, or with null, to nothing (it's still remembered). */
+    link(consoleName: string, target: ConsoleTarget | null): Promise<void>
+    /** Mutes or unmutes the button's strip on its console. */
+    setMuted(muted: boolean): Promise<void>
+    /** Forgets a console and what it was linked to. */
+    forget(consoleName: string): Promise<void>
+  }
 }
 
 /** URL of a spoken cue made by the main process. */

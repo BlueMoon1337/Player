@@ -936,6 +936,66 @@ button.small {
   width: 4px;
 }
 
+/* The console button: mutes a channel, bus or DCA on an X32. Only there once one is linked. */
+.strip.master.has-console {
+  grid-template-rows: 28px 30px minmax(0, 1fr) 30px;
+}
+.console-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 84px;
+  height: 24px;
+  margin-top: 2px;
+  padding: 0 7px;
+  border: 1.5px solid #4a4a4f;
+  border-radius: 6px;
+  background: #1c1c1e;
+  color: #ececee;
+  font-size: 12px;
+  font-weight: 600;
+}
+.console-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.console-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.console-btn.muted {
+  background: var(--mute);
+  border-color: var(--mute);
+  color: #fff;
+}
+.console-btn.muted .console-dot {
+  background: #fff;
+}
+.console-btn.waiting .console-dot {
+  background: #6b6b70;
+}
+/* Linked, but the console isn't on the network. */
+.console-btn.offline {
+  opacity: 0.4;
+  cursor: default;
+}
+.console-btn.offline .console-dot {
+  background: none;
+  border: 1.5px solid #9a9aa0;
+}
+.dialog.console-link select {
+  width: 100%;
+  padding: 6px 8px;
+}
+.console-error {
+  color: var(--mute);
+}
+
 .mixer-side {
   display: flex;
   flex-direction: column;

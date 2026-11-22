@@ -27,6 +27,8 @@ mac:
   extendInfo:
     # Only used if you click "Show all audio devices" to list interfaces by name.
     NSMicrophoneUsageDescription: Player asks for audio access only to list your audio interfaces by name. It never records.
+    # The console button finds X32 mixing consoles on the local network and mutes a channel on one.
+    NSLocalNetworkUsageDescription: Player looks for your mixing console on the local network, so the console button can mute and unmute a channel on it.
 
 win:
   target:

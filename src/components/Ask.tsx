@@ -10,6 +10,8 @@ export interface AskOptions {
   message?: string
   /** The button that says yes: "Delete", "Rename"… */
   confirmLabel?: string
+  /** The button that says no, when "Cancel" doesn't fit: "Not Now"… */
+  cancelLabel?: string
   /** A red button, for something that throws work away. */
   danger?: boolean
 }
@@ -115,7 +117,7 @@ function AskBox({ ask }: { ask: Pending }) {
         )}
         <div className="dialog-actions">
           <span className="dialog-actions-spacer" />
-          {ask.kind !== 'alert' && <button onClick={() => answer(null)}>Cancel</button>}
+          {ask.kind !== 'alert' && <button onClick={() => answer(null)}>{ask.cancelLabel ?? 'Cancel'}</button>}
           <button
             ref={confirmRef}
             className={ask.danger ? 'destructive' : 'primary'}

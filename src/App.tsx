@@ -6,6 +6,7 @@ import { computePeaks } from './audio/peaks'
 import { renderDemoStems } from './audio/synth'
 import { type Song, keyRoot, sectionIndexAt } from './audio/types'
 import { AskHost, ContextMenuHost, alertDialog, confirmDelete, isAsking } from './components/Ask'
+import { ConsoleLinkHost, ConsoleWatcher } from './components/ConsoleButton'
 import { type LowerView, Mixer } from './components/Mixer'
 import { SongSettingsDialog, type SongTab } from './components/Panels'
 import { SettingsDialog, type SettingsTab } from './components/SettingsDialog'
@@ -1182,6 +1183,8 @@ export default function App() {
         </div>
       )}
       {dragging && <div className="overlay drop">Drop stems to create a new song</div>}
+      <ConsoleWatcher playing={state.playing} />
+      <ConsoleLinkHost />
       <AskHost />
       <ContextMenuHost />
     </div>

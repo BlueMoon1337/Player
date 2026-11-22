@@ -9,6 +9,7 @@ import { busSettingsLocked } from './RoutingTabs'
 import { getSettings, setSetting, useSettings } from '../settings'
 import { Fader } from './Fader'
 import { LoopForeverIcon, LoopOnceIcon } from './LoopIcons'
+import { ConsoleButton, consoleMenu, useConsoleState } from './ConsoleButton'
 
 export type LowerView = 'mixer' | 'buses' | 'pad'
 
@@ -166,6 +167,7 @@ const shortRoute = (bus: Bus) => (bus === 'main' ? undefined : busLabel(bus).rep
 export function Mixer(p: Props) {
   const { engine, state, song, view, setView, pad } = p
   const settings = useSettings()
+  const consoleState = useConsoleState()
   const meter = useMeters()
   const [clickOpen, setClickOpen] = useState(false)
   const [openBuses, setOpenBuses] = useState<Set<string>>(new Set())
@@ -505,7 +507,11 @@ export function Mixer(p: Props) {
         {loopButton('once', 'Repeat this section once', <LoopOnceIcon />)}
         {loopButton('forever', 'Repeat this section until turned off', <LoopForeverIcon />)}
       </div>
-      <div className="strip master">
+      <div
+        className={`strip master ${consoleState?.button ? 'has-console' : ''}`}
+        // Right-click the Master strip to set up the console button (desktop only).
+        onContextMenu={consoleState ? (e) => showContextMenu(e, consoleMenu(consoleState)) : undefined}
+      >
         {view === 'pad' ? (
           <span className="btn-solo placeholder" />
         ) : (
@@ -526,6 +532,7 @@ export function Mixer(p: Props) {
             ↺
           </button>
         )}
+        <ConsoleButton />
         <div className="master-fader">
           <div className="master-meters">
             <div className="master-meter">

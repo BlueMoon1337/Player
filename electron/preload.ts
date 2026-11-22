@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { DesktopAPI, ImportProgress, MenuCommand } from '../src/platform/types'
+import type { ConsoleState, DesktopAPI, ImportProgress, MenuCommand } from '../src/platform/types'
 
 const api: DesktopAPI = {
   platform: process.platform,
@@ -82,6 +82,20 @@ const api: DesktopAPI = {
     return () => {
       ipcRenderer.removeListener('menu', listener)
     }
+  },
+  console: {
+    state: () => ipcRenderer.invoke('console:state'),
+    onState: (cb) => {
+      const listener = (_e: Electron.IpcRendererEvent, s: ConsoleState) => cb(s)
+      ipcRenderer.on('console:state', listener)
+      return () => {
+        ipcRenderer.removeListener('console:state', listener)
+      }
+    },
+    strips: (name) => ipcRenderer.invoke('console:strips', name),
+    link: (name, target) => ipcRenderer.invoke('console:link', name, target),
+    setMuted: (muted) => ipcRenderer.invoke('console:set-muted', muted),
+    forget: (name) => ipcRenderer.invoke('console:forget', name),
   },
 }
 
