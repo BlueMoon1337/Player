@@ -981,6 +981,7 @@ export default function App() {
           currentId={currentId}
           editing={editing}
           playing={state.playing}
+          fadeSeconds={fadeSeconds}
           songEnd={(id) => songEnd(setlist ?? undefined, id)}
           onSongEnd={(id, end) => setlist && setSongEnd(setlist.id, id, end)}
           onAddSong={(index, anchor) => setAddAt({ index: index ?? songs.length, anchor })}

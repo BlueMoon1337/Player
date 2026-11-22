@@ -604,9 +604,10 @@ function registerIpc() {
 
   handle('lumen:state', () => lumenLink.state())
   handle('lumen:set-looking', (on: unknown) => lumenLink.setLooking(on === true))
-  handle('lumen:play', (what: unknown) => {
-    if (what !== 'random-countdown' && what !== 'outro') throw new Error('Expected random-countdown or outro')
-    return lumenLink.play(what)
+  handle('lumen:play', (what: unknown, seconds: unknown) => {
+    if (what !== 'random-countdown' && what !== 'outro' && what !== 'fade-music') throw new Error('Expected random-countdown, outro or fade-music')
+    const fade = typeof seconds === 'number' && Number.isFinite(seconds) ? Math.max(0.5, Math.min(30, seconds)) : undefined
+    return lumenLink.play(what, fade)
   })
 
   ipcMain.on('app:active', (e, on: unknown) => {

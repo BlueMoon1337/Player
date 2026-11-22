@@ -108,7 +108,7 @@ const api: DesktopAPI = {
       }
     },
     setLooking: (on) => void ipcRenderer.invoke('lumen:set-looking', on),
-    play: (what) => ipcRenderer.invoke('lumen:play', what),
+    play: (what, seconds) => ipcRenderer.invoke('lumen:play', what, seconds),
   },
 }
 

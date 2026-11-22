@@ -238,8 +238,8 @@ export interface ConsoleState {
 
 // ----------------------------------------------- Lumen (the presentation app) on the network
 
-/** What the Random Countdown and Outro boxes ask Lumen to play. */
-export type LumenWhat = 'random-countdown' | 'outro'
+/** What the Random Countdown, Fade Out Music and Outro boxes ask Lumen to do. */
+export type LumenWhat = 'random-countdown' | 'outro' | 'fade-music'
 
 export interface LumenState {
   /** The Lumen the boxes use (one that lets Player play, else any), or null when none answered. */
@@ -253,6 +253,13 @@ export interface LumenState {
     countdowns: number
     /** The active outro's name; null when Lumen has none. */
     outro: string | null
+    /** The track playing on Lumen's Audio layer; null when none. */
+    music: string | null
+    /**
+     * Each command Lumen knows: null when it can be done now, else why not. Missing (Lumen 1.0.17)
+     * or without a command: that Lumen doesn't know it.
+     */
+    can: Partial<Record<LumenWhat, string | null>> | null
   } | null
   /** Other copies of Lumen answering too. */
   others: number
@@ -373,7 +380,8 @@ export interface DesktopAPI {
     onState(cb: (s: LumenState) => void): () => void
     /** Look for Lumen (while the boxes show) or stop. */
     setLooking(on: boolean): void
-    play(what: LumenWhat): Promise<LumenPlayResult>
+    /** `seconds`: how long a fade takes. */
+    play(what: LumenWhat, seconds?: number): Promise<LumenPlayResult>
   }
 }
 

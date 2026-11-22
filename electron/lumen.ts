@@ -1,10 +1,11 @@
-// The Random Countdown and Outro boxes' link to Lumen (github.com/BlueMoon1337/lumen), the
-// presentation app, on this computer or another one on the local network.
+// The Random Countdown, Fade Out Music and Outro boxes' link to Lumen
+// (github.com/BlueMoon1337/lumen), the presentation app, on this computer or another one on the
+// local network.
 //
 // Lumen Remote is JSON over UDP port 57312 (Lumen's src-tauri/src/remote.rs). Player asks
 // `{"app":"lumen-remote","v":1,"cmd":"hello"}` and each Lumen answers with its name and what it can
-// play; `{"cmd":"play","what":"random-countdown"|"outro","id":…}` plays it, and Lumen answers whether
-// it did. Player only asks while the boxes are showing (Settings ▸ General ▸ Lumen Boxes): one
+// do; `{"cmd":"play","what":"random-countdown"|"outro"|"fade-music","id":…}` does it (a fade with
+// its "seconds"), and Lumen answers whether it did. Player only asks while the boxes are showing (Settings ▸ General ▸ Lumen Boxes): one
 // question to the network every few seconds, so a box can say whether Lumen is there.
 
 import dgram from 'node:dgram'
@@ -28,6 +29,8 @@ interface Found {
   allowed: boolean
   countdowns: number
   outro: string | null
+  music: string | null
+  can: Partial<Record<LumenWhat, string | null>> | null
   seen: number
 }
 
@@ -86,15 +89,23 @@ export class LumenLink {
     const lumen = this.chosen()
     return {
       lumen: lumen
-        ? { name: lumen.name, ready: lumen.ready, allowed: lumen.allowed, countdowns: lumen.countdowns, outro: lumen.outro }
+        ? {
+            name: lumen.name,
+            ready: lumen.ready,
+            allowed: lumen.allowed,
+            countdowns: lumen.countdowns,
+            outro: lumen.outro,
+            music: lumen.music,
+            can: lumen.can,
+          }
         : null,
       others: Math.max(0, this.found.size - 1),
       blocked: this.blocked && this.found.size === 0,
     }
   }
 
-  /** Asks Lumen to play a random countdown or the outro. */
-  async play(what: LumenWhat): Promise<LumenPlayResult> {
+  /** Asks Lumen to play a random countdown or the outro, or to fade its music out over `seconds`. */
+  async play(what: LumenWhat, seconds?: number): Promise<LumenPlayResult> {
     let lumen = this.chosen()
     if (!lumen) {
       // Not heard from yet: ask, and give it a moment.
@@ -114,7 +125,9 @@ export class LumenLink {
         resolve(r)
       })
     })
-    this.send({ app: APP, v: 1, cmd: 'play', what, id }, lumen.address)
+    this.send({ app: APP, v: 1, cmd: 'play', what, id, ...(seconds !== undefined ? { seconds } : {}) }, lumen.address)
+    // Lumen only answers: ask again straight away, so the boxes show what's changed (the music gone).
+    setTimeout(() => this.look(), 300)
     const r = await reply
     if (!r) return { ok: false, message: `Lumen on “${lumen.name}” didn’t answer.` }
     return { ok: r.ok, message: r.message, lumen: lumen.name }
@@ -165,6 +178,8 @@ export class LumenLink {
         allowed: m.allowed === true,
         countdowns: typeof m.countdowns === 'number' ? m.countdowns : 0,
         outro: typeof m.outro === 'string' ? m.outro : null,
+        music: typeof m.music === 'string' ? m.music : null,
+        can: m.can && typeof m.can === 'object' ? (m.can as Partial<Record<LumenWhat, string | null>>) : null,
         seen: Date.now(),
       })
       this.emit()

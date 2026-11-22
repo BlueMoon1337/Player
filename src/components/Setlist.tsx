@@ -11,6 +11,8 @@ interface Props {
   songs: Song[]
   currentId: string | null
   playing: boolean
+  /** Settings ▸ General ▸ Fade Length: the Fade Out Music box fades Lumen's music over it. */
+  fadeSeconds?: number
   onSelect: (id: string) => void
   onImport: (files: File[]) => void
   /** Replaces the browser file picker (desktop uses a native dialog). */
@@ -332,6 +334,7 @@ export function Setlist(p: Props) {
   return (
     <div className="setlist" {...dropProps}>
       <LumenBox what="random-countdown" />
+      <LumenBox what="fade-music" seconds={p.fadeSeconds} />
       {songs.map((s, i) => (
         <div
           key={`${s.id}-${i}`}
