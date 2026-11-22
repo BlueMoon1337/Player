@@ -180,6 +180,8 @@ export class Engine {
   private masterMeters: [AnalyserNode, AnalyserNode] | null = null
   private sources: AudioBufferSourceNode[] = []
   private sourceChannel = new WeakMap<AudioBufferSourceNode, Channel>()
+  /** The previous song's stems, still sounding under the next one after an Overlap / Crossfade. */
+  private ringing: AudioBufferSourceNode[] = []
   private song: Song | null = null
   /** Overlap / Crossfade: when playback crosses this point the next song is handed in. */
   private handoffAt: number | null = null
@@ -766,36 +768,47 @@ export class Engine {
     await this.play()
   }
 
-  /** Takes the playing song's stems out of the mixer but leaves them sounding until they end (or fade). */
+  /**
+   * Takes the playing song's stems out of the mixer but leaves them sounding until the song ends as
+   * arranged (or `fade` seconds from now): at its Fade Out's end, fading as it would have, or where
+   * a cut at the end leaves off, not at the end of the audio.
+   */
   private ringOut(fade: number | null) {
     const keep = this.sources.filter((s) => {
       const ch = this.sourceChannel.get(s)
       return ch?.fromSong && ch.group === 'stem'
     })
     if (!keep.length) return
+    const song = this.song!
+    // Up to the hand-off the song plays without cuts in its way (it's in the last section heard),
+    // so heard time runs with the clock.
+    const left = Math.max(0, toHeard(song, this.endOfSong()) - toHeard(song, this.position))
+    const end = this.ctx.currentTime + (fade ? Math.min(fade, left) : left)
+    if (!fade) this.scheduleFadeOut(true)
     this.sources = this.sources.filter((s) => !keep.includes(s))
+    this.ringing.push(...keep)
     const chans = new Set(keep.map((s) => this.sourceChannel.get(s)!))
     for (const ch of chans) {
       this.channels.delete(ch.id)
       this.order = this.order.filter((o) => o !== ch.id)
     }
     const now = this.ctx.currentTime
-    let left = keep.length
+    let count = keep.length
     for (const s of keep) {
       s.onended = () => {
         s.disconnect()
-        if (--left > 0) return
+        this.ringing = this.ringing.filter((r) => r !== s)
+        if (--count > 0) return
         for (const ch of chans) {
           ch.gain.disconnect()
           ch.panner.disconnect()
         }
       }
-      if (fade) {
-        try {
-          s.stop(now + fade)
-        } catch {
-          /* already over */
-        }
+      try {
+        s.loop = false
+        s.stop(end)
+      } catch {
+        /* already over */
       }
     }
     if (fade) {
@@ -804,6 +817,26 @@ export class Engine {
         ch.input.gain.linearRampToValueAtTime(0, now + fade)
       }
     }
+  }
+
+  /** Stop: the previous song's ring-out stops too (quickly faded, so it doesn't click). */
+  private silenceRinging() {
+    if (!this.ringing.length) return
+    const now = this.ctx.currentTime
+    for (const s of this.ringing) {
+      const ch = this.sourceChannel.get(s)
+      if (ch) {
+        ch.input.gain.cancelScheduledValues(now)
+        ch.input.gain.setValueAtTime(ch.input.gain.value, now)
+        ch.input.gain.linearRampToValueAtTime(0, now + 0.03)
+      }
+      try {
+        s.stop(now + 0.04)
+      } catch {
+        /* already over */
+      }
+    }
+    this.ringing = []
   }
 
   /** Where the next song is handed in (Overlap / Crossfade); null for none. */
@@ -831,6 +864,7 @@ export class Engine {
 
   /** Stops and lets go of the current song (e.g. it was deleted). */
   unload() {
+    this.silenceRinging()
     this.stopSources()
     this.playing = false
     this.pausedPos = 0
@@ -859,6 +893,7 @@ export class Engine {
    */
   release() {
     this.transportRequest++
+    this.silenceRinging()
     this.stopSources()
     this.playing = false
     this.loop = null
@@ -1028,6 +1063,7 @@ export class Engine {
 
   pause() {
     this.transportRequest++
+    this.silenceRinging()
     if (!this.playing) return
     this.pausedPos = this.position
     this.stopSources()
@@ -1262,9 +1298,10 @@ export class Engine {
   /**
    * Section Fade Out: as playback reaches the fade, the tracks ramp down to silence by its end (the
    * click and spoken cues keep going, to count the band out). Started inside the fade, they come in
-   * at the level the fade has reached there.
+   * at the level the fade has reached there. `ahead`: schedule it now, however far off it is (a
+   * song ringing out under the next one, which this no longer ticks for).
    */
-  private scheduleFadeOut() {
+  private scheduleFadeOut(ahead = false) {
     const song = this.song!
     const f = fadeOut(song)
     if (!f || !this.fadeArmed || this.fadeOutScheduled || this.loop) return
@@ -1274,7 +1311,7 @@ export class Engine {
     const at = toHeard(song, this.position)
     const start = toHeard(song, f.start)
     const end = toHeard(song, f.end)
-    if (at < start - 0.3 || at >= end) return
+    if ((!ahead && at < start - 0.3) || at >= end) return
     // Heard time runs with the clock (cuts are skipped without a gap).
     const t0 = now + Math.max(0, start - at)
     const t1 = now + (end - at)
