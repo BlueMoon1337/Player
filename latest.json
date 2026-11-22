@@ -1,11 +1,11 @@
 {
-  "version": "1.4.5",
-  "notes": "- A console button above the Master fader: mutes and unmutes a channel, mix bus or DCA group on a Behringer or Midas X32 on the local network",
-  "date": "2026-11-22T22:59:03.372Z",
+  "version": "1.4.6",
+  "notes": "- Console button: look for consoles only once a button is set up\n- Add a console button above the Master fader (1.4.5)\n- Fix: Overlap / Crossfade ring-out follows the arrangement, and Stop stops it\n- Fade Out at any section\n- Fix: the last song asked for wins, edits saved on quit, overlap after a cut\n- publish-package: a first publish's notes start at the previous version\n- Updates from the updates branch, no token needed\n- publish-package: send JSON requests with their content type\n- Update packages: Install from Zip, Go Back, and releases without Actions minutes\n- Bus levels per song, Reset for the faders, Guide beside the Click\n- Cut sections: leave a section's music out, and the song gets shorter\n- Long songs fit in memory: let go before reading, fold dual-mono stems\n- Pad and transport: an Off or a second Play can't be overtaken\n- Export Player: a copy of the installed app as a disk image or zip\n- Release: build the Mac app on an Intel Mac, and replace files on a retried draft\n- Cleaner sound: proper sample-rate conversion and a lookahead limiter\n- Tempo changes and time signature changes\n- Song Settings ▸ Sections: a section list like MultiTracks'\n- Section changes: this setlist only, or every setlist\n- Recognize KeyFinder's stems",
+  "date": "2026-11-22T23:04:48.468Z",
   "interface": {
-    "file": "Player-1.4.5-update.zip",
-    "sha512": "473aa20eb1932201ddfa164320a1978f1bd0ab982a7f7b77abbe9402bb3b9c848d3555661c8e37cbb54cc60a2110e0d4e2711436888c20a0634963210fc8be48",
+    "file": "Player-1.4.6-update.zip",
+    "sha512": "94360daa679688052f03ed406f5369a018cbb6c6f53621800fa0bb466df8212843b224c41501bb3a9d6b176c5e2899f652f898d14b9529b0ac514d642fd6d330",
     "electron": "44.7.0",
-    "signature": "PtaKHHYaxZFb5333pL0mYCk+FAK67oXCK77qrIfxU7MdBsUaxT4T1Aqy9daAStnT8ruN2sF8G+sPeNWT82SFDA=="
+    "signature": "L4nTEyuWnhU821gf79KuS0rv5Qf+vGI+h1cumYRZAJzAyxFj8Iil/t5JiryiSks4YEqE9AduUDVhlu9y+S/kDA=="
   }
 }
