@@ -248,7 +248,7 @@ export interface LumenState {
     name: string
     /** It has started, and said what it has. */
     ready: boolean
-    /** Lumen lets Player play (Timers ▸ Countdown Videos ▸ "Player can play the countdown and outro"). */
+    /** Lumen lets Player play (Lumen's Settings ▸ Player). */
     allowed: boolean
     countdowns: number
     /** The active outro's name; null when Lumen has none. */

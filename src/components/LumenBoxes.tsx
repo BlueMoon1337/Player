@@ -54,7 +54,7 @@ function status(s: LumenState | null, what: LumenWhat, seconds: number): { text:
   const on = l.name
   if (!l.ready) return { text: 'Lumen is starting', tip: `Lumen on “${on}” is still starting.`, ready: false }
   if (!l.allowed) {
-    return { text: 'Off in Lumen', tip: `Lumen on “${on}” is set not to let Player play anything: turn on “Player can play the countdown and outro” in its Timers tab.`, ready: false }
+    return { text: 'Off in Lumen', tip: `Lumen on “${on}” is set not to let Player play anything: turn it on in Lumen’s Settings ▸ Player.`, ready: false }
   }
   if (what === 'fade-music') {
     // Lumen 1.0.17 can't fade its music for Player: it has no list of what it can do.
