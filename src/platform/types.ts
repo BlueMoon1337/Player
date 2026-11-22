@@ -255,6 +255,8 @@ export interface LumenState {
     outro: string | null
     /** The track playing on Lumen's Audio layer; null when none. */
     music: string | null
+    /** Lumen's active logo, which Fade Out Music clears the screen to; null when none (or not said). */
+    logo: string | null
     /**
      * Each command Lumen knows: null when it can be done now, else why not. Missing (Lumen 1.0.17)
      * or without a command: that Lumen doesn't know it.

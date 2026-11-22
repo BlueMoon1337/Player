@@ -61,9 +61,13 @@ function status(s: LumenState | null, what: LumenWhat, seconds: number): { text:
     if (!l.can || !('fade-music' in l.can)) {
       return { text: 'Update Lumen', tip: `Lumen on “${on}” can’t fade its music for Player yet: update it to 1.0.18 or later.`, ready: false }
     }
+    const why = l.can['fade-music']
+    if (why) return { text: 'Not now in Lumen', tip: why, ready: false }
+    // Lumen fades the music, clears everything else, and shows its logo (or a clear screen).
+    const then = l.logo ? `clears the screen to the logo “${l.logo}”` : 'clears the screen (Lumen has no logo)'
     return l.music
-      ? { text: `Lumen · ${l.music}`, tip: `Fades out “${l.music}” in Lumen on “${on}” over ${seconds} seconds (Settings ▸ General ▸ Fade Length).`, ready: true }
-      : { text: 'No music in Lumen', tip: `Nothing is playing on Lumen’s Audio layer on “${on}”.`, ready: false }
+      ? { text: `Lumen · ${l.music}`, tip: `Fades out “${l.music}” in Lumen on “${on}” over ${seconds} seconds (Settings ▸ General ▸ Fade Length), and ${then}.`, ready: true }
+      : { text: l.logo ? 'Lumen · Show the logo' : 'Lumen · Clear the screen', tip: `No music is playing in Lumen on “${on}”: this ${then}.`, ready: true }
   }
   if (what === 'random-countdown') {
     return l.countdowns

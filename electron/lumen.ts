@@ -30,6 +30,7 @@ interface Found {
   countdowns: number
   outro: string | null
   music: string | null
+  logo: string | null
   can: Partial<Record<LumenWhat, string | null>> | null
   seen: number
 }
@@ -96,6 +97,7 @@ export class LumenLink {
             countdowns: lumen.countdowns,
             outro: lumen.outro,
             music: lumen.music,
+            logo: lumen.logo,
             can: lumen.can,
           }
         : null,
@@ -179,6 +181,7 @@ export class LumenLink {
         countdowns: typeof m.countdowns === 'number' ? m.countdowns : 0,
         outro: typeof m.outro === 'string' ? m.outro : null,
         music: typeof m.music === 'string' ? m.music : null,
+        logo: typeof (m.details as { logo?: unknown } | undefined)?.logo === 'string' ? (m.details as { logo: string }).logo : null,
         can: m.can && typeof m.can === 'object' ? (m.can as Partial<Record<LumenWhat, string | null>>) : null,
         seen: Date.now(),
       })
