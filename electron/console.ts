@@ -143,6 +143,8 @@ interface Online {
 
 export class ConsoleLink {
   private socket: dgram.Socket | null = null
+  /** Player is quitting: nothing more is sent. */
+  private stopped = false
   private timer: NodeJS.Timeout | null = null
   private ticks = 0
   private lastSweep = 0
@@ -172,21 +174,37 @@ export class ConsoleLink {
   start() {
     this.consoles = this.load()
     this.choose()
+    this.tick()
+    this.timer = setInterval(() => this.tick(), TICK_MS)
+  }
+
+  /**
+   * The socket, made the first time something is sent: with no button set up Player never opens
+   * one, so nothing asks about the network (Windows' firewall asks when a program first listens).
+   * One that fails is dropped, and the next send makes another.
+   */
+  private ensureSocket(): dgram.Socket | null {
+    if (this.socket || this.stopped) return this.socket
     const socket = dgram.createSocket('udp4')
     this.socket = socket
     socket.on('message', (msg, rinfo) => this.receive(msg, rinfo.address))
-    socket.on('error', () => {})
-    socket.bind(0, () => {
-      socket.setBroadcast(true)
-      this.tick()
-      this.timer = setInterval(() => this.tick(), TICK_MS)
+    socket.on('error', () => {
+      if (this.socket === socket) this.socket = null
+      try {
+        socket.close()
+      } catch {
+        /* already closed */
+      }
     })
+    socket.bind(0, () => socket.setBroadcast(true))
+    return socket
   }
 
   stop() {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
     this.save()
+    this.stopped = true
     this.socket?.close()
     this.socket = null
   }
@@ -432,7 +450,7 @@ export class ConsoleLink {
   private send(packet: Buffer, address: string, quiet = false) {
     const round = this.round
     if (!quiet) round.sent++
-    this.socket?.send(packet, PORT, address, (err) => {
+    this.ensureSocket()?.send(packet, PORT, address, (err) => {
       if (quiet || round !== this.round) return
       const code = (err as NodeJS.ErrnoException | null)?.code
       if (code === 'EHOSTUNREACH' || code === 'EPERM' || code === 'ENETDOWN') round.failed++
@@ -474,11 +492,15 @@ export class ConsoleLink {
     }
   }
 
+  /** Saved whole or not at all (a new file renamed over the old one), so a crash can't lose the consoles. */
   private save() {
+    const tmp = `${this.file}.${process.pid}.tmp`
     try {
-      fs.writeFileSync(this.file, JSON.stringify({ version: 1, consoles: this.consoles }, null, 2))
+      fs.writeFileSync(tmp, JSON.stringify({ version: 1, consoles: this.consoles }, null, 2))
+      fs.renameSync(tmp, this.file)
     } catch {
       /* not writable: remembered for this run only */
+      fs.rmSync(tmp, { force: true })
     }
   }
 }

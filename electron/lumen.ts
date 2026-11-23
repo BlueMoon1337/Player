@@ -55,6 +55,8 @@ function broadcasts(): string[] {
 
 export class LumenLink {
   private socket: dgram.Socket | null = null
+  /** Player is quitting: nothing more is sent. */
+  private stopped = false
   private timer: NodeJS.Timeout | null = null
   private found = new Map<string, Found>()
   private waiting = new Map<string, (reply: { ok: boolean; message: string | null }) => void>()
@@ -67,15 +69,34 @@ export class LumenLink {
   constructor(private readonly onChange: (s: LumenState) => void) {}
 
   start() {
+    // The socket is made when the boxes first look for Lumen (see ensureSocket).
+  }
+
+  /**
+   * The socket, made the first time something is sent: with the boxes hidden Player never opens
+   * one, so nothing asks about the network (Windows' firewall asks when a program first listens).
+   * One that fails is dropped, and the next send makes another.
+   */
+  private ensureSocket(): dgram.Socket | null {
+    if (this.socket || this.stopped) return this.socket
     const socket = dgram.createSocket('udp4')
     this.socket = socket
     socket.on('message', (msg, rinfo) => this.receive(msg, rinfo.address))
-    socket.on('error', () => {})
+    socket.on('error', () => {
+      if (this.socket === socket) this.socket = null
+      try {
+        socket.close()
+      } catch {
+        /* already closed */
+      }
+    })
     socket.bind(0, () => socket.setBroadcast(true))
+    return socket
   }
 
   stop() {
     this.setLooking(false)
+    this.stopped = true
     this.socket?.close()
     this.socket = null
   }
@@ -211,7 +232,7 @@ export class LumenLink {
   private send(body: object, address: string, quiet = false) {
     const round = this.round
     if (!quiet) round.sent++
-    this.socket?.send(Buffer.from(JSON.stringify(body)), PORT, address, (err) => {
+    this.ensureSocket()?.send(Buffer.from(JSON.stringify(body)), PORT, address, (err) => {
       if (quiet || round !== this.round) return
       const code = (err as NodeJS.ErrnoException | null)?.code
       if (code === 'EHOSTUNREACH' || code === 'EPERM' || code === 'ENETDOWN') round.failed++
