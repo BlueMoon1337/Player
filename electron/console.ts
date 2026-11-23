@@ -156,6 +156,8 @@ export class ConsoleLink {
   private label = ''
   private muted: boolean | null = null
   private blocked = false
+  /** The network questions of the current tick, and how many failed: blocked if all of them do. */
+  private round = { sent: 0, failed: 0, done: 0 }
   /** Until when a search asked for by the user runs (see search()). */
   private searchUntil = 0
   private lastSent = ''
@@ -237,6 +239,8 @@ export class ConsoleLink {
 
   async forget(name: string) {
     this.consoles = this.consoles.filter((c) => c.name !== name)
+    // Not asked about as a new console straight away, just because it's still on the network.
+    this.asked.add(name)
     if (this.newConsole?.name === name) this.newConsole = null
     this.save()
     this.choose()
@@ -321,8 +325,9 @@ export class ConsoleLink {
     }
 
     // Nothing to look for: no button, and no one setting one up. Stay quiet on the network.
+    // (emit() sends only what changed: a search that has just ended, say.)
     if (!this.hasButton() && !this.searching()) {
-      if (changed) this.emit()
+      this.emit()
       return
     }
 
@@ -332,6 +337,7 @@ export class ConsoleLink {
     const xinfo = encode('/xinfo')
     for (const c of this.consoles) this.send(xinfo, c.address, true)
     const nets = localNetworks()
+    this.round = { sent: 0, failed: 0, done: 0 }
     this.send(xinfo, '255.255.255.255')
     for (const n of nets) this.send(xinfo, n.broadcast)
     if (this.online.size === 0 && now - this.lastSweep > SWEEP_MS) {
@@ -340,7 +346,7 @@ export class ConsoleLink {
     }
 
     this.pollButton(this.ticks % 4 === 1)
-    if (changed) this.emit()
+    this.emit()
   }
 
   /** A button is set up: its console is looked for all the time. */
@@ -418,12 +424,22 @@ export class ConsoleLink {
     }
   }
 
+  /**
+   * `quiet`: its failure doesn't count. Otherwise it's one of a tick's broadcasts: macOS refuses
+   * them all until Player is allowed the local network (Local Network privacy), so when all of
+   * them fail Player is blocked, and once they go through again (allowed) it isn't.
+   */
   private send(packet: Buffer, address: string, quiet = false) {
+    const round = this.round
+    if (!quiet) round.sent++
     this.socket?.send(packet, PORT, address, (err) => {
-      // macOS refuses local network traffic until Player is allowed (Local Network privacy).
+      if (quiet || round !== this.round) return
       const code = (err as NodeJS.ErrnoException | null)?.code
-      if (!quiet && (code === 'EHOSTUNREACH' || code === 'EPERM' || code === 'ENETDOWN') && !this.blocked) {
-        this.blocked = true
+      if (code === 'EHOSTUNREACH' || code === 'EPERM' || code === 'ENETDOWN') round.failed++
+      if (++round.done < round.sent) return
+      const blocked = round.failed === round.sent
+      if (blocked !== this.blocked) {
+        this.blocked = blocked
         this.emit()
       }
     })

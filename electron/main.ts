@@ -249,6 +249,8 @@ function createWindow() {
   })
   win.on('closed', () => {
     win = null
+    // The boxes went with the window (no unmount runs when it closes): stop looking for Lumen.
+    lumenLink?.setLooking(false)
   })
 }
 

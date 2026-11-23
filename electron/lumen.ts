@@ -23,7 +23,10 @@ const REPLY_MS = 2500
 
 interface Found {
   name: string
+  /** Where it answered from on the network (not this computer's loopback). */
   address: string
+  /** When it last answered on 127.0.0.1, i.e. it's on this computer (0: never). */
+  local: number
   version: string
   ready: boolean
   allowed: boolean
@@ -56,6 +59,8 @@ export class LumenLink {
   private found = new Map<string, Found>()
   private waiting = new Map<string, (reply: { ok: boolean; message: string | null }) => void>()
   private blocked = false
+  /** The network questions of the current look, and how many failed: blocked if all of them do. */
+  private round = { sent: 0, failed: 0, done: 0 }
   private lastSent = ''
   private seq = 0
 
@@ -127,7 +132,10 @@ export class LumenLink {
         resolve(r)
       })
     })
-    this.send({ app: APP, v: 1, cmd: 'play', what, id, ...(seconds !== undefined ? { seconds } : {}) }, lumen.address)
+    // Lumen on this computer is asked on 127.0.0.1, which keeps working when the network changes
+    // (Wi-Fi drops, a new address) and is never blocked by macOS.
+    const to = Date.now() - lumen.local < GONE_MS ? '127.0.0.1' : lumen.address
+    this.send({ app: APP, v: 1, cmd: 'play', what, id, ...(seconds !== undefined ? { seconds } : {}) }, to, true)
     // Lumen only answers: ask again straight away, so the boxes show what's changed (the music gone).
     setTimeout(() => this.look(), 300)
     const r = await reply
@@ -154,6 +162,7 @@ export class LumenLink {
     const hello = { app: APP, v: 1, cmd: 'hello' }
     // Lumen on this computer, then on the network.
     this.send(hello, '127.0.0.1', true)
+    this.round = { sent: 0, failed: 0, done: 0 }
     this.send(hello, '255.255.255.255')
     for (const b of broadcasts()) this.send(hello, b)
   }
@@ -170,11 +179,13 @@ export class LumenLink {
     if (m.type === 'hello' && typeof m.name === 'string') {
       // One entry per copy of Lumen: by its name (the same Lumen can answer on two addresses).
       const key = m.name
-      // On this computer, it answers to 127.0.0.1 as well as its network address: either works.
+      // On this computer it answers on 127.0.0.1 as well as on its network address.
       const prev = this.found.get(key)
+      const loopback = from === '127.0.0.1'
       this.found.set(key, {
         name: m.name,
-        address: prev && from === '127.0.0.1' ? prev.address : from,
+        address: loopback ? (prev?.address ?? from) : from,
+        local: loopback ? Date.now() : (prev?.local ?? 0),
         version: String(m.version ?? ''),
         ready: m.ready === true,
         allowed: m.allowed === true,
@@ -192,12 +203,22 @@ export class LumenLink {
     }
   }
 
+  /**
+   * `quiet`: its failure doesn't count. Otherwise it's one of a look's network questions: macOS
+   * refuses them all until Player is allowed the local network (Local Network privacy), so when
+   * all of them fail Player is blocked, and once they go through again (allowed) it isn't.
+   */
   private send(body: object, address: string, quiet = false) {
+    const round = this.round
+    if (!quiet) round.sent++
     this.socket?.send(Buffer.from(JSON.stringify(body)), PORT, address, (err) => {
-      // macOS refuses local network traffic until Player is allowed (Local Network privacy).
+      if (quiet || round !== this.round) return
       const code = (err as NodeJS.ErrnoException | null)?.code
-      if (!quiet && (code === 'EHOSTUNREACH' || code === 'EPERM' || code === 'ENETDOWN') && !this.blocked) {
-        this.blocked = true
+      if (code === 'EHOSTUNREACH' || code === 'EPERM' || code === 'ENETDOWN') round.failed++
+      if (++round.done < round.sent) return
+      const blocked = round.failed === round.sent
+      if (blocked !== this.blocked) {
+        this.blocked = blocked
         this.emit()
       }
     })
