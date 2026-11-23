@@ -1,11 +1,11 @@
 {
-  "version": "1.4.9",
-  "notes": "- Fade Out Music: Lumen clears the screen to its logo too\n- Lumen boxes: \"Off in Lumen\" points to Lumen's Settings > Player",
-  "date": "2026-11-23T00:01:47.182Z",
+  "version": "1.4.10",
+  "notes": "- New console question: wait while the pad plays too\n- Console and Lumen links: open the network only when needed; save consoles safely\n- Fix Lumen and console connectivity: local Lumen, blocked, Forget, search, closed window",
+  "date": "2026-11-23T00:38:48.875Z",
   "interface": {
-    "file": "Player-1.4.9-update.zip",
-    "sha512": "9bd90a59f1e32af9430723329af6d9deee6679ac07c1bc56367315211ce88eaa32906048149775d734b263a3a0ad87136c6781a973fa06f18360a66d7792ea39",
+    "file": "Player-1.4.10-update.zip",
+    "sha512": "f5e2a715164b00e235a9bf6c6b30a40ff99cfa44677fbcb67550e94b75331b08963d8cb64ce9d5c286bfa00353eee0b37a24105e85fe005c3c3fac0cb3702521",
     "electron": "44.7.0",
-    "signature": "lJPsfO02d+sypBglqgDBZY4AZv3JiDVzfjov+XdvuNPTETZNjOXEzIARkK2+dVhm5Wfzvv75Cd7EFlmMNzC7CQ=="
+    "signature": "oUH3H1sEaXw6kYi6MVxSmuFUQpHKh7GQyH7mhpFQz0IgMJZGIN43r9UM9uAgNpyl8/alWdGa9DVnIZctjS89Bw=="
   }
 }
