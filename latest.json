@@ -1,11 +1,11 @@
 {
-  "version": "1.4.8",
-  "notes": "- Fade Out Music box: fades out the music playing in Lumen\n- Settings > Console: the console button and remembered consoles",
-  "date": "2026-11-22T23:38:13.268Z",
+  "version": "1.4.9",
+  "notes": "- Fade Out Music: Lumen clears the screen to its logo too\n- Lumen boxes: \"Off in Lumen\" points to Lumen's Settings > Player",
+  "date": "2026-11-23T00:01:47.182Z",
   "interface": {
-    "file": "Player-1.4.8-update.zip",
-    "sha512": "ea387a6c8e7b00e366eee0c2019baf12c8ebd7c6278fa5fdd6d371fdc6fe360657ca58fde545c446c851425cdf8384fe713c3cacb348fc115d341fad952d8ad8",
+    "file": "Player-1.4.9-update.zip",
+    "sha512": "9bd90a59f1e32af9430723329af6d9deee6679ac07c1bc56367315211ce88eaa32906048149775d734b263a3a0ad87136c6781a973fa06f18360a66d7792ea39",
     "electron": "44.7.0",
-    "signature": "l8/xcqGGpQEm5ho6aIzgrFENVdQM8AW/JBgm/hikjKbfg7qMaYCdYF7ioUdkB1l8uLUVA3UmbGl5ReZDQmpaAQ=="
+    "signature": "lJPsfO02d+sypBglqgDBZY4AZv3JiDVzfjov+XdvuNPTETZNjOXEzIARkK2+dVhm5Wfzvv75Cd7EFlmMNzC7CQ=="
   }
 }
