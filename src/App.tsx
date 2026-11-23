@@ -1184,7 +1184,8 @@ export default function App() {
         </div>
       )}
       {dragging && <div className="overlay drop">Drop stems to create a new song</div>}
-      <ConsoleWatcher playing={state.playing} />
+      {/* Not while a song or the pad plays: the question would take the keyboard (Space would answer it). */}
+      <ConsoleWatcher playing={state.playing || padOn} />
       <ConsoleLinkHost />
       <AskHost />
       <ContextMenuHost />

@@ -136,7 +136,7 @@ export function consoleMenu(s: ConsoleState | null): MenuEntry[] {
 
 /**
  * Asks about a console Player hasn't seen before, once: link a strip to the button, or not.
- * Never while audio plays or another question is open; it waits for those.
+ * Never while audio plays (a song or the pad) or another question is open; it waits for those.
  */
 export function ConsoleWatcher({ playing }: { playing: boolean }) {
   const s = useConsoleState()
